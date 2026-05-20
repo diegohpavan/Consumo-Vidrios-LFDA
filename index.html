@@ -2135,6 +2135,29 @@ function exportPDFReclamos() {
     return s+p*9*pct;
   },0);
 
+  // Get ingresos for selected month
+  const selMesForSummary = state.reclamosMesSel||'todos';
+  // Match "Abril de 2026" -> "Abril" by extracting first word
+  function matchMesKey(mesLabel) {
+    const firstWord = mesLabel.split(' ')[0].toLowerCase();
+    return Object.keys(state.data).find(m => m.toLowerCase() === firstWord);
+  }
+
+  // If todos, aggregate ingresos from all reclamo months
+  let ingresosDelMes = {};
+  if(selMesForSummary === 'todos') {
+    const recMeses = [...new Set(recs.map(r=>r.mes))];
+    recMeses.forEach(mes => {
+      const key = matchMesKey(mes);
+      if(!key) return;
+      const ing = state.data[key]?.ingresos || {};
+      Object.entries(ing).forEach(([t,v]) => { ingresosDelMes[t] = (ingresosDelMes[t]||0) + v; });
+    });
+  } else {
+    const key = matchMesKey(selMesForSummary);
+    ingresosDelMes = key ? (state.data[key]?.ingresos || {}) : {};
+  }
+
   const summaryRows = Object.entries(tiposCount).sort((a,b)=>b[1]-a[1]).map(([tipo,cnt])=>{
     const recsTipo = recs.filter(r=>r.tipo===tipo);
     const costo = recsTipo.reduce((s,r)=>{
@@ -2143,7 +2166,8 @@ function exportPDFReclamos() {
       return s+p*9*pct;
     },0);
     const avgPerdido = recsTipo.reduce((s,r)=>s+(r.perdidoPct||0),0)/recsTipo.length;
-    return [tipo, cnt, avgPerdido.toFixed(0)+'%', costo>0?formatPesos(costo):'-'];
+    const ingresosTipo = ingresosDelMes[tipo] || 0;
+    return [tipo, cnt, avgPerdido.toFixed(0)+'%', ingresosTipo > 0 ? ingresosTipo : '-', costo>0?formatPesos(costo):'-'];
   });
 
   const summary = [
@@ -2151,18 +2175,164 @@ function exportPDFReclamos() {
     {label:'Costo total estimado', value:costoTotal>0?formatPesos(costoTotal):'-', color:[0,229,255]},
   ];
 
-  // Temporarily override selectedMonths for PDF header
+  // Detail rows
+  const detailRows = recs.map(r=>[
+    r.fecha,
+    r.tipo,
+    r.paquete||'-',
+    (r.porcentaje||'?')+'%',
+    (r.perdidoPct!==null?r.perdidoPct:'?')+'%',
+    r.nroReclamo||'-',
+    r.observaciones||'-'
+  ]);
+
+  // Ingresos del mes seleccionado
+  const selMes = state.reclamosMesSel||'todos';
+  let ingresosRows = [];
+  if(selMes !== 'todos') {
+    // Find matching month in state.data
+    const mesKey = Object.keys(state.data).find(m => {
+      const mesLower = m.toLowerCase();
+      const selLower = selMes.toLowerCase();
+      return selLower.includes(mesLower) || mesLower.includes(selLower.split(' ')[0]);
+    });
+    if(mesKey) {
+      const ingresos = state.data[mesKey]?.ingresos || {};
+      ingresosRows = Object.entries(ingresos).sort((a,b)=>b[1]-a[1]).map(([tipo,cant])=>[tipo, cant]);
+    }
+  }
+
+  // Build PDF manually for full control
+  const {jsPDF} = window.jspdf;
+  const doc = new jsPDF();
+  const W = doc.internal.pageSize.getWidth();
+  const recMeses = [...new Set(recs.map(r=>r.mes))];
   const _origMonths = state.selectedMonths;
-  const recMeses = [...new Set(getReclamosFiltrados().map(r=>r.mes))];
   state.selectedMonths = recMeses.length ? recMeses : ['Sin filtro'];
-  exportPDF(
-    'Reclamos de Calidad — IGLASS',
-    ['Tipología','Planchas','% Perdido Prom.','Costo Pérdida'],
-    summaryRows,
-    [],
-    summary
-  );
+
+  // Header
+  doc.setFillColor(10,10,31);
+  doc.rect(0,0,W,48,'F');
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(11);
+  doc.setTextColor(0,229,255);
+  doc.text('VIDRIOS LFDA', 14, 13);
+  doc.setFontSize(20);
+  doc.setTextColor(255,255,255);
+  doc.text('Reclamos de Calidad — IGLASS', 14, 26);
+  doc.setFont('helvetica','normal');
+  doc.setFontSize(10);
+  doc.setTextColor(150,150,180);
+  doc.text(`Meses: ${state.selectedMonths.join(' · ')}`, 14, 36);
+  doc.text(`Generado: ${new Date().toLocaleDateString('es-AR')}`, 14, 43);
+  doc.setDrawColor(0,229,255);
+  doc.setLineWidth(0.8);
+  doc.line(0,48,W,48);
+
+  let y = 56;
+
+  // Summary cards
+  const cardW = (W-28)/2;
+  [{label:'Total reclamos', value:`${recs.length} planchas`, color:[255,77,106]},
+   {label:'Costo total estimado', value:costoTotal>0?formatPesos(costoTotal):'-', color:[0,229,255]}
+  ].forEach((line,i) => {
+    const x = 14 + i*(cardW+4);
+    doc.setFillColor(17,17,40);
+    doc.roundedRect(x, y, cardW, 24, 2, 2, 'F');
+    doc.setDrawColor(...line.color);
+    doc.setLineWidth(0.5);
+    doc.roundedRect(x, y, cardW, 24, 2, 2, 'S');
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(8);
+    doc.setTextColor(150,150,180);
+    doc.text(line.label, x+6, y+9);
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(13);
+    doc.setTextColor(...line.color);
+    doc.text(String(line.value), x+6, y+19);
+  });
+  y += 32;
+
+  // Section 1: Resumen por tipología
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(13);
+  doc.setTextColor(0,229,255);
+  doc.text('Resumen por Tipología', 14, y);
+  y += 4;
+  doc.autoTable({
+    head:[['Tipología','Planchas c/defecto','% Perdido Prom.','Ingresos del mes','Costo Pérdida']],
+    body: summaryRows,
+    startY: y,
+    styles:{fontSize:10, cellPadding:4},
+    headStyles:{fillColor:[0,229,255], textColor:0, fontStyle:'bold', fontSize:10},
+    alternateRowStyles:{fillColor:[245,247,255]},
+    columnStyles:{0:{fontStyle:'bold',textColor:[0,100,140]}},
+    columnStyles:{0:{fontStyle:'bold',textColor:[0,100,140]},3:{halign:'center'},4:{halign:'right'}},
+    margin:{left:14,right:14},
+  });
+  y = doc.lastAutoTable.finalY + 10;
+
+  // Section 2: Detalle de planchas
+  if(y > 230){doc.addPage(); y=14;}
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(13);
+  doc.setTextColor(255,77,106);
+  doc.text('Detalle de Planchas con Defecto', 14, y);
+  y += 4;
+  doc.autoTable({
+    head:[['Fecha','Tipología','Paquete','% Usado','% Perdido','N° Reclamo','Observaciones']],
+    body: detailRows,
+    startY: y,
+    styles:{fontSize:8.5, cellPadding:3},
+    headStyles:{fillColor:[255,77,106], textColor:255, fontStyle:'bold', fontSize:9},
+    alternateRowStyles:{fillColor:[255,248,248]},
+    columnStyles:{
+      0:{cellWidth:22},1:{cellWidth:20,fontStyle:'bold',textColor:[180,0,0]},
+      2:{cellWidth:28},3:{cellWidth:16,halign:'center'},4:{cellWidth:16,halign:'center'},
+      5:{cellWidth:28},6:{cellWidth:'auto'},
+    },
+    margin:{left:14,right:14},
+  });
+  y = doc.lastAutoTable.finalY + 10;
+
+  // Section 3: Ingresos del mes
+  if(ingresosRows.length) {
+    if(y > 230){doc.addPage(); y=14;}
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(13);
+    doc.setTextColor(0,229,160);
+    doc.text(`Ingresos a Planta — ${selMes}`, 14, y);
+    y += 4;
+    doc.autoTable({
+      head:[['Tipología','Planchas ingresadas']],
+      body: ingresosRows,
+      startY: y,
+      styles:{fontSize:10, cellPadding:4},
+      headStyles:{fillColor:[0,229,160], textColor:0, fontStyle:'bold', fontSize:10},
+      alternateRowStyles:{fillColor:[245,255,250]},
+      columnStyles:{0:{fontStyle:'bold',textColor:[0,120,80]}},
+      margin:{left:14,right:14},
+    });
+    y = doc.lastAutoTable.finalY + 6;
+    doc.setFont('helvetica','italic');
+    doc.setFontSize(8);
+    doc.setTextColor(150,150,180);
+    doc.text('* Ingresos tomados de los archivos Excel de consumo cargados en la app.', 14, y);
+  }
+
+  // Page numbers
+  const pageCount = doc.internal.getNumberOfPages();
+  for(let i=1;i<=pageCount;i++){
+    doc.setPage(i);
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(8);
+    doc.setTextColor(150,150,180);
+    doc.text(`Pág. ${i} / ${pageCount}`, W-14, doc.internal.pageSize.getHeight()-8, {align:'right'});
+  }
+
   state.selectedMonths = _origMonths;
+  doc.save(`Reclamos_Calidad_${new Date().toISOString().slice(0,10)}.pdf`);
+  toast('PDF exportado ✓');
 }
 
 
