@@ -2163,7 +2163,8 @@ function exportPDFReclamos() {
     const p = getPrecioTipo(tipo)||0;
     const costoBruto = p * 9 * cnt;
     const ingresosTipo = ingresosDelMes[tipo] || 0;
-    return [tipo, cnt, ingresosTipo > 0 ? ingresosTipo : '-', costoBruto>0?formatPesos(costoBruto):'-'];
+    const pctRechazo = ingresosTipo > 0 ? (cnt/ingresosTipo*100).toFixed(1)+'%' : '-';
+    return [tipo, cnt, ingresosTipo > 0 ? ingresosTipo : '-', pctRechazo, costoBruto>0?formatPesos(costoBruto):'-'];
   });
   const costoTotalBruto = Object.entries(tiposCount).reduce((s,[tipo,cnt])=>{
     return s + (getPrecioTipo(tipo)||0)*9*cnt;
@@ -2288,13 +2289,13 @@ function exportPDFReclamos() {
   doc.text(costoTotalBruto>0?formatPesos(costoTotalBruto):'-', W-20, y+11, {align:'right'});
   y += 22;
   doc.autoTable({
-    head:[['Tipología','Planchas c/defecto','Ingresos del mes','Costo Bruto (plancha completa)']],
+    head:[['Tipología','Planchas c/defecto','Ingresos del mes','% Rechazo','Costo Bruto (plancha completa)']],
     body: brutaRows,
     startY: y,
     styles:{fontSize:10, cellPadding:4},
     headStyles:{fillColor:[180,40,40], textColor:255, fontStyle:'bold', fontSize:10},
     alternateRowStyles:{fillColor:[255,245,245]},
-    columnStyles:{0:{fontStyle:'bold',textColor:[160,0,0]},2:{halign:'center'},3:{halign:'right',fontStyle:'bold'}},
+    columnStyles:{0:{fontStyle:'bold',textColor:[160,0,0]},2:{halign:'center'},3:{halign:'center',fontStyle:'bold',textColor:[180,0,0]},4:{halign:'right',fontStyle:'bold'}},
     margin:{left:14,right:14},
   });
   y = doc.lastAutoTable.finalY + 12;
