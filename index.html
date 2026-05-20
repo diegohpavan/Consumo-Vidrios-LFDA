@@ -2158,6 +2158,18 @@ function exportPDFReclamos() {
     ingresosDelMes = key ? (state.data[key]?.ingresos || {}) : {};
   }
 
+  // BRUTA: costo plancha completa (sin % perdido)
+  const brutaRows = Object.entries(tiposCount).sort((a,b)=>b[1]-a[1]).map(([tipo,cnt])=>{
+    const p = getPrecioTipo(tipo)||0;
+    const costoBruto = p * 9 * cnt;
+    const ingresosTipo = ingresosDelMes[tipo] || 0;
+    return [tipo, cnt, ingresosTipo > 0 ? ingresosTipo : '-', costoBruto>0?formatPesos(costoBruto):'-'];
+  });
+  const costoTotalBruto = Object.entries(tiposCount).reduce((s,[tipo,cnt])=>{
+    return s + (getPrecioTipo(tipo)||0)*9*cnt;
+  },0);
+
+  // NETA: costo por % perdido (recupero parcial)
   const summaryRows = Object.entries(tiposCount).sort((a,b)=>b[1]-a[1]).map(([tipo,cnt])=>{
     const recsTipo = recs.filter(r=>r.tipo===tipo);
     const costo = recsTipo.reduce((s,r)=>{
@@ -2253,26 +2265,64 @@ function exportPDFReclamos() {
   });
   y += 32;
 
-  // Section 1: Resumen por tipología
+  // Section 1: Pérdida Bruta
+  if(y > 220){doc.addPage(); y=14;}
   doc.setFont('helvetica','bold');
   doc.setFontSize(13);
-  doc.setTextColor(0,229,255);
-  doc.text('Resumen por Tipología', 14, y);
-  y += 4;
+  doc.setTextColor(200,50,50);
+  doc.text('Resumen de Pérdida Bruta por Tipología', 14, y);
+  doc.setFont('helvetica','italic');
+  doc.setFontSize(9);
+  doc.setTextColor(150,150,180);
+  doc.text('Costo total de la plancha completa — como si se devuelve al proveedor sin recupero', 14, y+6);
+  y += 14;
+  doc.setFillColor(40,10,10);
+  doc.roundedRect(14, y, W-28, 16, 2, 2, 'F');
+  doc.setDrawColor(200,50,50);
+  doc.setLineWidth(0.5);
+  doc.roundedRect(14, y, W-28, 16, 2, 2, 'S');
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(10);
+  doc.setTextColor(200,50,50);
+  doc.text('Pérdida bruta total estimada:', 20, y+11);
+  doc.text(costoTotalBruto>0?formatPesos(costoTotalBruto):'-', W-20, y+11, {align:'right'});
+  y += 22;
   doc.autoTable({
-    head:[['Tipología','Planchas c/defecto','% Perdido Prom.','Ingresos del mes','Costo Pérdida']],
+    head:[['Tipología','Planchas c/defecto','Ingresos del mes','Costo Bruto (plancha completa)']],
+    body: brutaRows,
+    startY: y,
+    styles:{fontSize:10, cellPadding:4},
+    headStyles:{fillColor:[180,40,40], textColor:255, fontStyle:'bold', fontSize:10},
+    alternateRowStyles:{fillColor:[255,245,245]},
+    columnStyles:{0:{fontStyle:'bold',textColor:[160,0,0]},2:{halign:'center'},3:{halign:'right',fontStyle:'bold'}},
+    margin:{left:14,right:14},
+  });
+  y = doc.lastAutoTable.finalY + 12;
+
+  // Section 2: Recupero Parcial
+  if(y > 220){doc.addPage(); y=14;}
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(13);
+  doc.setTextColor(180,120,0);
+  doc.text('Detalle de Recupero Parcial por Tipología', 14, y);
+  doc.setFont('helvetica','italic');
+  doc.setFontSize(9);
+  doc.setTextColor(150,150,180);
+  doc.text('Costo neto según % de plancha efectivamente perdido — considera el material recuperado', 14, y+6);
+  y += 10;
+  doc.autoTable({
+    head:[['Tipología','Planchas c/defecto','% Perdido Prom.','Ingresos del mes','Costo Pérdida Neta']],
     body: summaryRows,
     startY: y,
     styles:{fontSize:10, cellPadding:4},
-    headStyles:{fillColor:[0,229,255], textColor:0, fontStyle:'bold', fontSize:10},
-    alternateRowStyles:{fillColor:[245,247,255]},
-    columnStyles:{0:{fontStyle:'bold',textColor:[0,100,140]}},
-    columnStyles:{0:{fontStyle:'bold',textColor:[0,100,140]},3:{halign:'center'},4:{halign:'right'}},
+    headStyles:{fillColor:[180,120,0], textColor:0, fontStyle:'bold', fontSize:10},
+    alternateRowStyles:{fillColor:[255,252,235]},
+    columnStyles:{0:{fontStyle:'bold',textColor:[120,80,0]},3:{halign:'center'},4:{halign:'right'}},
     margin:{left:14,right:14},
   });
   y = doc.lastAutoTable.finalY + 10;
 
-  // Section 2: Detalle de planchas
+  // Section 3: Detalle de planchas
   if(y > 230){doc.addPage(); y=14;}
   doc.setFont('helvetica','bold');
   doc.setFontSize(13);
@@ -2295,7 +2345,7 @@ function exportPDFReclamos() {
   });
   y = doc.lastAutoTable.finalY + 10;
 
-  // Section 3: Ingresos del mes
+  // Section 4: Ingresos del mes
   if(ingresosRows.length) {
     if(y > 230){doc.addPage(); y=14;}
     doc.setFont('helvetica','bold');
