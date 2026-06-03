@@ -266,6 +266,7 @@ input:checked+.slider:before{transform:translateX(18px);background:#000}
     <button class="nav-btn" data-tab="pedidos" onclick="cambiarTab('pedidos')"><span>📋</span>Pedidos</button>
     <button class="nav-btn" data-tab="reclamos" onclick="cambiarTab('reclamos')"><span>🔍</span>Reclamos</button>
     <button class="nav-btn" data-tab="glosario" onclick="cambiarTab('glosario')"><span>📖</span>Glosario</button>
+    <button class="nav-btn" data-tab="analisis" onclick="cambiarTab('analisis')"><span>📉</span>Análisis</button>
     <button class="nav-btn" id="navAdmin" data-tab="admin" onclick="cambiarTab('admin')" style="display:none"><span>⚙️</span>Admin</button>
   </div>
 
@@ -408,6 +409,7 @@ const state = {
   precios: {"F4": 8134.07, "F5": 10711.82, "F6": 13285.58, "F4 G.CLARO": 12760.16, "F4 OPACID": 40468.01, "F6 OPACID 3210X2400": 13285.58, "F5 GRIS": 13285.58, "L3+3": 23562.4, "L3+3 ESM": 40468.01, "L3+3 G.C.": 29626.21, "L3+3 VC": 29626.21, "L3+3 low-e": 61300.36, "L4+4": 29436.78, "L4+4 ESM": 44781.09, "L4+4 VC": 29436.78, "L4+4BSL": 62046.18, "L4+4 BSG": 62046.18, "L4+4 BSN": 62046.18, "L4+4 BSA": 66647.43, "L4+4 BSV": 62046.18, "L4+4 BSB": 66647.43, "L4+4 GRIS": 42499.23, "L4+4  GRIS": 42499.23, "L4+4 ST 150 GRIS": 42499.23, "L4+4 ST 150 GRIS OSC.": 42499.23, "L4+4 STOP BE": 44781.09, "L4+4 LOW-E": 74393.92, "L5+5": 35388.73, "L5+5 ESM": 53560.41, "L 5+5 ABA": 35388.73, "L6+6": 39439.37, "L6+6  2250X3300": 39439.37, "L3+5 ACU": 41327.84, "L4+3 PAC": 29436.78, "L4+6 BSG": 62046.18},
   chatHistory: [],
   charts: {},
+  selectedTiposAnalisis: null, // null = usa todos los de TIPOS_ANALISIS
 };
 
 const MESES_ORDER = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
@@ -425,33 +427,55 @@ const PRELOADED_DATA = {
     "consumo":             {"F4":26,"F4 G.CLARO":4,"L3+3":239,"L3+3 ESM":1,"L3+3 G.C.":23,"L3+3 VC":1,"L4+4":69,"L4+4BSL":26,"L5+5":8},
     "descuentos_daños":    {"F4":2,"L3+3":38,"L3+3 G.C.":5,"L3+3 VC":1,"L4+4":19,"L4+4BSL":1,"L5+5":5},
     "descuentos_proveedor":{"L3+3":1},
-    "ingresos":            {"F4":24,"F4 G.CLARO":25,"L3+3":273,"L3+3 G.C.":20,"L4+4":98,"L4+4BSL":24,"L5+5":10,"L6+6":8}
+    "ingresos":            {"F4":24,"F4 G.CLARO":25,"L3+3":273,"L3+3 G.C.":20,"L4+4":98,"L4+4BSL":24,"L5+5":10,"L6+6":8},
+    "stock_inicio":        {}
   },
   "Febrero": {
     "consumo":             {"F4":47,"F5":4,"F6":1,"L3+3":208,"L3+3 ESM":2,"L4+4":82,"L4+4BSL":57,"L5+5":11,"L6+6":3},
     "descuentos_daños":    {"F4":7,"L3+3":22,"L4+4":19,"L4+4BSL":4,"L5+5":8},
     "descuentos_proveedor":{"L4+4":2,"L4+4BSL":3},
-    "ingresos":            {"F4":20,"L3+3":159,"L4+4":36,"L4+4BSL":74,"L5+5":11}
+    "ingresos":            {"F4":20,"L3+3":159,"L4+4":36,"L4+4BSL":74,"L5+5":11},
+    "stock_inicio":        {}
   },
   "Marzo": {
     "consumo":             {"F4":41,"L3+3":211,"L3+3 ESM":5,"L4+4":63,"L4+4 BSG":7,"L4+4BSL":55,"L5+5":16,"L6+6":2,"L6+6 2250X3300":1},
     "descuentos_daños":    {"F4":5,"L3+3":32,"L4+4":6,"L4+4BSL":10,"L6+6 2250X3300":1},
     "descuentos_proveedor":{},
-    "ingresos":            {"F4":56,"L3+3":183,"L4+4":37,"L4+4BSL":25,"L5+5":42}
+    "ingresos":            {"F4":56,"L3+3":183,"L4+4":37,"L4+4BSL":25,"L5+5":42},
+    "stock_inicio":        {}
   },
   "Abril": {
     "consumo":             {"F4":19,"F5":1,"L3+3":106,"L3+3 ESM":1,"L4+4":55,"L4+4BSL":37,"L5+5":23},
     "descuentos_daños":    {"F4":3,"L3+3":19,"L4+4":15,"L4+4BSL":13,"L5+5":3},
     "descuentos_proveedor":{"L4+4BSL":1},
-    "ingresos":            {"F4":14,"L3+3":118,"L4+4":102,"L4+4 BSG":4,"L4+4BSL":47,"L5+5":10}
+    "ingresos":            {"F4":14,"L3+3":118,"L4+4":102,"L4+4 BSG":4,"L4+4BSL":47,"L5+5":10},
+    "stock_inicio":        {"F4":20,"F5":2,"F6":5,"L3+3":73,"L3+3 ESM":12,"L4+4":-14,"L4+4BSL":0,"L5+5":32,"L5+5 ESM":1,"L3+3 VC":0,"L3+3 G.C.":0,"L4+4 VC":2,"L4+4 ESM":2,"L 5+5 ABA":7,"L6+6":9,"L6+6 2250X3300":16},
+    "stock_final":         {"F4":12,"F5":1,"F6":5,"L3+3":66,"L3+3 ESM":11,"L4+4":-14,"L4+4BSL":0,"L5+5":16,"L5+5 ESM":1,"L3+3 VC":0,"L3+3 G.C.":0,"L4+4 VC":2,"L4+4 ESM":2,"L 5+5 ABA":7,"L6+6":9,"L6+6 2250X3300":16}
   },
   "Mayo": {
     "consumo":             {"L4+4":1},
     "descuentos_daños":    {"L4+4":1},
     "descuentos_proveedor":{},
-    "ingresos":            {}
+    "ingresos":            {},
+    "stock_inicio":        {}
   }
 };
+
+// Siempre inyecta stock_inicio y stock_final del PRELOADED_DATA sobre state.data
+// (Firebase no guarda estos campos — viven solo en el código)
+function injectPreloadedStock() {
+  Object.entries(PRELOADED_DATA).forEach(([mes, pd]) => {
+    if (!state.data[mes]) return;
+    // Solo inyectar stock_inicio/final si el Excel no trajo solapas diarias
+    const tieneDiario = state.data[mes].stock_por_dia && Object.keys(state.data[mes].stock_por_dia).length > 0;
+    if (!tieneDiario) {
+      if (pd.stock_inicio && Object.keys(pd.stock_inicio).length > 0)
+        state.data[mes].stock_inicio = pd.stock_inicio;
+      if (pd.stock_final && Object.keys(pd.stock_final||{}).length > 0)
+        state.data[mes].stock_final = pd.stock_final;
+    }
+  });
+}
 
 // ===== INIT =====
 window.onload = () => {
@@ -478,6 +502,7 @@ function loadFromStorage() {
     if(xd) {
       const extra = JSON.parse(xd);
       Object.assign(state.data, extra);
+      injectPreloadedStock(); // restaurar stock_inicio/final que no se guarda en localStorage
       state.selectedMonths = Object.keys(state.data).sort((a,b)=>MESES_ORDER.indexOf(a)-MESES_ORDER.indexOf(b));
     }
   } catch(e){}
@@ -501,6 +526,7 @@ async function loadFromFirebase() {
       if(d.passes)  localStorage.setItem('sv_passes', JSON.stringify(d.passes));
       if(d.meses && Object.keys(d.meses).length > 0) {
         state.data = d.meses;
+        injectPreloadedStock(); // siempre inyectar stock_inicio/final del PRELOADED_DATA
         state.selectedMonths = Object.keys(state.data).sort((a,b)=>MESES_ORDER.indexOf(a)-MESES_ORDER.indexOf(b));
         localStorage.setItem('sv_extra_data', JSON.stringify(state.data));
       }
@@ -516,6 +542,7 @@ async function loadFromFirebase() {
       if(d.passes)  localStorage.setItem('sv_passes', JSON.stringify(d.passes));
       if(d.meses && Object.keys(d.meses).length > 0) {
         state.data = d.meses;
+        injectPreloadedStock(); // siempre inyectar stock_inicio/final del PRELOADED_DATA
         state.selectedMonths = Object.keys(state.data).sort((a,b)=>MESES_ORDER.indexOf(a)-MESES_ORDER.indexOf(b));
         localStorage.setItem('sv_extra_data', JSON.stringify(state.data));
       }
@@ -816,6 +843,7 @@ function renderTab() {
     case 'admin': c.innerHTML = renderAdmin(); break;
     case 'reclamos': c.innerHTML = renderReclamos(); initReclamos(); break;
     case 'glosario': c.innerHTML = renderGlosario(); break;
+    case 'analisis': c.innerHTML = renderAnalisis(); initAnalisisCharts(); break;
   }
 }
 
@@ -1619,9 +1647,9 @@ async function processExcelFile(file) {
     let mes = detectMonth(file.name, wb);
     if(!mes) { if(statusEl) statusEl.textContent='❌ No se pudo detectar el mes'; return; }
 
-    const data = {consumo:{},descuentos_daños:{},descuentos_proveedor:{},ingresos:{}};
+    const data = {consumo:{},descuentos_daños:{},descuentos_proveedor:{},ingresos:{},stock_inicio:{},stock_por_dia:{}};
 
-    // Read from RESUMEN APP sheet (row 1=title, row 2=note, row 3=headers, data from row 4)
+    // ── RESUMEN APP: totales mensuales ──────────────────────────────────────
     const resumenSheet = wb.SheetNames.find(s=>s.toUpperCase().trim()==='RESUMEN APP');
     if(resumenSheet) {
       const ws = wb.Sheets[resumenSheet];
@@ -1634,11 +1662,40 @@ async function processExcelFile(file) {
         const roturas = parseNum(row[2]) || 0;
         const falla_p = parseNum(row[3]) || 0;
         const ingreso = parseNum(row[4]) || 0;
+        const st_ini  = parseNum(row[5]);
         if(consumo>0) data.consumo[tipo] = (data.consumo[tipo]||0) + consumo;
         if(roturas>0) data.descuentos_daños[tipo] = (data.descuentos_daños[tipo]||0) + roturas;
         if(falla_p>0) data.descuentos_proveedor[tipo] = (data.descuentos_proveedor[tipo]||0) + falla_p;
         if(ingreso>0) data.ingresos[tipo] = (data.ingresos[tipo]||0) + ingreso;
+        if(st_ini !== null) data.stock_inicio[tipo] = st_ini;
       });
+
+      // ── SOLAPAS DIARIAS: "1", "2", ... "31" ────────────────────────────
+      // Cada solapa = un día del mes. Col A = tipología, Col B = stock de ese día.
+      // stock_por_dia[tipo] = { 1: stockDia1, 2: stockDia2, ... }
+      const mesNum = MESES_NUMERO[mes]; // 0=ene, 3=abr, etc.
+      wb.SheetNames.forEach(sheetName => {
+        const diaNum = parseInt(sheetName.trim(), 10);
+        if(isNaN(diaNum) || diaNum < 1 || diaNum > 31) return; // solo solapas numéricas
+        try {
+          const wsDia = wb.Sheets[sheetName];
+          const rowsDia = XLSX.utils.sheet_to_json(wsDia, {header:1, defval:null, raw:true});
+          rowsDia.forEach(row => {
+            if(!row || !row[0]) return;
+            const tipo = String(row[0]).trim();
+            if(!tipo || tipo.length < 2) return;
+            const up = tipo.toUpperCase();
+            if(up==='TIP'||up==='DE'||up==='VIDRIOS'||up==='TOTAL'||up==='TIPOLOGÍA') return;
+            if(/^[\d\s\/\-]+$/.test(tipo)) return;
+            // Col B (índice 1) = stock del día
+            const stockDia = parseNum(row[1]);
+            if(stockDia === null) return;
+            if(!data.stock_por_dia[tipo]) data.stock_por_dia[tipo] = {};
+            data.stock_por_dia[tipo][diaNum] = stockDia;
+          });
+        } catch(eDia) { console.warn('Error leyendo solapa', sheetName, eDia); }
+      });
+
       state.data[mes] = data;
       state.selectedMonths = Object.keys(state.data).sort((a,b)=>MESES_ORDER.indexOf(a)-MESES_ORDER.indexOf(b));
       saveToStorage();
@@ -2383,6 +2440,740 @@ function exportPDFReclamos() {
   toast('PDF exportado ✓');
 }
 
+
+// ===== ANÁLISIS DE STOCK CERO =====
+
+const TIPOS_ANALISIS = ['F4','L3+3','L4+4','L5+5','L6+6','L4+4BSL','L3+3 ESM'];
+const MESES_NUMERO = {Enero:0,Febrero:1,Marzo:2,Abril:3,Mayo:4,Junio:5,Julio:6,Agosto:7,Septiembre:8,Octubre:9,Noviembre:10,Diciembre:11};
+const AÑO_ANALISIS = 2026;
+
+// Feriados nacionales Argentina 2026 (formato MM-DD)
+const FERIADOS_2026 = new Set([
+  '01-01', // Año Nuevo
+  '02-16', // Carnaval
+  '02-17', // Carnaval
+  '03-23', // Día Nacional de la Memoria
+  '04-02', // Día del Veterano y los Caídos en Malvinas
+  '04-03', // Viernes Santo
+  '04-05', // Domingo de Pascua (no laboral)
+  '05-01', // Día del Trabajador
+  '05-25', // Día de la Revolución de Mayo
+  '06-15', // Paso a la Inmortalidad del Gral. Güemes
+  '06-20', // Día de la Bandera (Paso a la Inmortalidad del Gral. Belgrano)
+  '07-09', // Día de la Independencia
+  '08-17', // Paso a la Inmortalidad del Gral. San Martín
+  '10-12', // Día del Respeto a la Diversidad Cultural
+  '11-20', // Día de la Soberanía Nacional
+  '12-08', // Inmaculada Concepción de María
+  '12-25', // Navidad
+]);
+
+// Calcula días hábiles reales (lun-vie, sin feriados) de un mes
+function getDiasHabiles(mes) {
+  const mesNum = MESES_NUMERO[mes];
+  if (mesNum === undefined) return 22;
+  const año = AÑO_ANALISIS;
+  const diasEnMes = new Date(año, mesNum + 1, 0).getDate();
+  let habiles = 0;
+  for (let d = 1; d <= diasEnMes; d++) {
+    const dow = new Date(año, mesNum, d).getDay(); // 0=dom, 6=sab
+    if (dow === 0 || dow === 6) continue; // sábado o domingo
+    const key = String(mesNum + 1).padStart(2,'0') + '-' + String(d).padStart(2,'0');
+    if (FERIADOS_2026.has(key)) continue; // feriado nacional
+    habiles++;
+  }
+  return habiles;
+}
+
+// Cache para no recalcular
+const _dhCache = {};
+function diasHabiles(mes) {
+  if (!_dhCache[mes]) _dhCache[mes] = getDiasHabiles(mes);
+  return _dhCache[mes];
+}
+
+// Normaliza variantes del mismo tipo: "L4+4 BSL" → "L4+4BSL", etc.
+function normTipoAnalisis(tipo) {
+  return tipo.trim().replace(/\s+/g,' ')
+    .replace(/^L4\+4\s+BSL$/i,'L4+4BSL')
+    .replace(/^L\s*4\+4\s*BSL$/i,'L4+4BSL');
+}
+
+// Busca el valor de un tipo en un objeto, probando variantes (filtra 0 con ||0)
+function getValTipo(obj, tipo) {
+  if (!obj) return 0;
+  if (obj[tipo] !== undefined) return obj[tipo] || 0;
+  const alt = tipo.replace('L4+4BSL','L4+4 BSL').replace('L4+4 BSL','L4+4BSL');
+  return obj[alt] || 0;
+}
+
+// Igual pero retorna null si no existe (preserva 0 y negativos — para stock_inicio)
+function getValTipoExacto(obj, tipo) {
+  if (!obj) return null;
+  if (obj[tipo] !== undefined) return obj[tipo];
+  const alt = tipo.replace('L4+4BSL','L4+4 BSL').replace('L4+4 BSL','L4+4BSL');
+  if (obj[alt] !== undefined) return obj[alt];
+  return null;
+}
+
+
+// Devuelve todas las tipologías presentes en state.data (para el selector)
+function getAllTiposMovimiento() {
+  const set = new Set();
+  Object.values(state.data).forEach(mes => {
+    ['consumo','ingresos'].forEach(k => {
+      Object.keys(mes[k]||{}).forEach(t => {
+        const nt = normTipoAnalisis(t);
+        if(nt && nt !== 'nan' && !/^\d+$/.test(nt)) set.add(nt);
+      });
+    });
+  });
+  // Unificar variantes L4+4BSL / L4+4 BSL
+  const arr = [...set];
+  return arr.filter((t,_,a) => !(t==='L4+4 BSL' && a.includes('L4+4BSL')));
+}
+
+function calcStockCeroTipo(tipo) {
+  const meses = getMeses();
+  let totalCons=0, totalIng=0, totalDias=0, totalDH=0;
+  const porMes = {};
+  let stockEncadenado = null; // stock final del mes anterior → inicio del siguiente
+
+  meses.forEach(mes => {
+    const d = state.data[mes];
+    // Si el mes tiene stock_inicio en sus datos, lo usamos; si no, usamos el encadenado del mes anterior
+    const tienePropio = d?.stock_inicio && getValTipoExacto(d.stock_inicio, tipo) !== null;
+    if (!tienePropio && stockEncadenado !== null && d) {
+      // Inyectar el stock encadenado si no hay dato propio
+      if (!d.stock_inicio) d.stock_inicio = {};
+      d.stock_inicio['__enc__'+tipo] = stockEncadenado;
+      // Workaround: parchamos getValTipoExacto temporalmente
+    }
+    const r = calcStockCeroMesConStock(mes, tipo, stockEncadenado);
+    totalCons += r.consumo;
+    totalIng  += r.ingresos;
+    totalDias += r.dias;
+    totalDH   += r.dh;
+    porMes[mes] = r;
+    // El stock final de este mes es el inicio del siguiente
+    if (r.stockFinal !== undefined) stockEncadenado = r.stockFinal;
+  });
+  return {tipo, totalCons, totalIng, balance:totalIng-totalCons, totalDias, totalDH, porMes};
+}
+
+// Versión que acepta stockInicioOverride para encadenamiento entre meses
+function calcStockCeroMesConStock(mes, tipo, stockInicioOverride) {
+  const d = state.data[mes];
+  const dh = diasHabiles(mes);
+  if (!d) return {consumo:0,consNeto:0,ingresos:0,stockInicio:null,stockFinal:null,dias:0,dh,tieneStockReal:false,tieneDiario:false};
+
+  const cons     = getValTipo(d.consumo, tipo);
+  const dcD      = getValTipo(d.descuentos_daños, tipo);
+  const dcP      = getValTipo(d.descuentos_proveedor, tipo);
+  const consNeto = Math.max(0, cons - dcD - dcP);
+  const ing      = getValTipo(d.ingresos, tipo);
+
+  // Stock inicio: propio Excel > encadenado > null
+  const propioB   = d.stock_inicio ? getValTipoExacto(d.stock_inicio, tipo) : null;
+  const stockInicio = propioB !== null ? propioB
+                    : (stockInicioOverride != null) ? stockInicioOverride
+                    : null;
+
+  // ── MODO EXACTO: tenemos stock_por_dia (solapas diarias del Excel) ────────
+  const stockDias = d.stock_por_dia ? (
+    d.stock_por_dia[tipo] ||
+    d.stock_por_dia[tipo?.replace('L4+4BSL','L4+4 BSL')] ||
+    d.stock_por_dia[tipo?.replace('L4+4 BSL','L4+4BSL')] ||
+    null
+  ) : null;
+
+  if (stockDias && Object.keys(stockDias).length > 0) {
+    const mesNum  = MESES_NUMERO[mes];
+    const año     = AÑO_ANALISIS;
+    let diasParada = 0;
+    const diasDetalle = [];
+
+    Object.entries(stockDias).forEach(([diaStr, stockVal]) => {
+      const dia = parseInt(diaStr, 10);
+      // Verificar si ese día es hábil (lun-vie, no feriado)
+      const fecha = new Date(año, mesNum, dia);
+      const dow   = fecha.getDay(); // 0=dom, 6=sab
+      if (dow === 0 || dow === 6) return; // fin de semana
+      const key   = String(mesNum+1).padStart(2,'0') + '-' + String(dia).padStart(2,'0');
+      if (FERIADOS_2026.has(key)) return; // feriado
+      // Si el stock de ese día (col B de la solapa) es ≤ 0 → parada
+      if (stockVal <= 0) {
+        diasParada++;
+        diasDetalle.push(dia);
+      }
+    });
+
+    const stockFinal = stockInicio !== null ? stockInicio + ing - consNeto : null;
+    return {consumo:cons, consNeto, ingresos:ing, stockInicio,
+            stockFinal, dias:diasParada, diasDetalle, dh,
+            tieneStockReal:true, tieneDiario:true};
+  }
+
+  // ── MODO ESTIMADO: tenemos stock_inicio pero no solapas diarias ───────────
+  if (stockInicio !== null) {
+    let dias = 0;
+    const stockFinal = stockInicio + ing - consNeto;
+    if (stockInicio <= 0) {
+      dias = dh; // arrancó sin stock → parada todo el mes
+    } else if (consNeto > 0) {
+      const consDaily = consNeto / dh;
+      const diaAgota  = consDaily > 0 ? Math.floor(stockInicio / consDaily) : dh;
+      dias = Math.max(0, dh - diaAgota);
+    }
+    return {consumo:cons, consNeto, ingresos:ing, stockInicio,
+            stockFinal, dias:Math.min(dias,dh), diasDetalle:[], dh,
+            tieneStockReal:true, tieneDiario:false};
+  }
+
+  // ── MODO APROXIMADO: solo totales, sin stock ──────────────────────────────
+  let dias = 0;
+  if (consNeto > 0 && ing === 0) {
+    dias = dh;
+  } else if (consNeto > ing) {
+    const deficit = consNeto - ing;
+    const daily   = consNeto / dh;
+    dias = Math.min(dh, Math.round(deficit / (daily || 1)));
+  }
+  return {consumo:cons, consNeto, ingresos:ing, stockInicio:null,
+          stockFinal:ing - consNeto, dias, diasDetalle:[], dh,
+          tieneStockReal:false, tieneDiario:false};
+}
+
+function getTiposSeleccionados() {
+  if (state.selectedTiposAnalisis && state.selectedTiposAnalisis.length > 0) return state.selectedTiposAnalisis;
+  return TIPOS_ANALISIS;
+}
+
+function toggleTipoAnalisis(tipo) {
+  const todos = getAllTiposMovimiento();
+  if (!state.selectedTiposAnalisis) state.selectedTiposAnalisis = [...TIPOS_ANALISIS];
+  if (state.selectedTiposAnalisis.includes(tipo)) {
+    if (state.selectedTiposAnalisis.length === 1) return; // mínimo 1
+    state.selectedTiposAnalisis = state.selectedTiposAnalisis.filter(t => t !== tipo);
+  } else {
+    state.selectedTiposAnalisis.push(tipo);
+  }
+  destroyCharts();
+  renderTab();
+}
+
+function resetTiposAnalisis() {
+  state.selectedTiposAnalisis = [...TIPOS_ANALISIS];
+  destroyCharts();
+  renderTab();
+}
+
+function selAllTiposAnalisis() {
+  state.selectedTiposAnalisis = getAllTiposMovimiento();
+  destroyCharts();
+  renderTab();
+}
+
+function renderAnalisis() {
+  const meses = getMeses();
+  if (!meses.length) return '<div class="empty-state"><div class="empty-icon">📉</div><div class="empty-text">Sin datos</div><div class="empty-sub">Cargá archivos Excel primero</div></div>';
+
+  const todosLosTipos = getAllTiposMovimiento().sort();
+  if (!state.selectedTiposAnalisis) state.selectedTiposAnalisis = [...TIPOS_ANALISIS];
+  const tiposActivos = getTiposSeleccionados();
+
+  const resultados = tiposActivos.map(calcStockCeroTipo);
+  const totalDiasQuiebre = resultados.reduce((a,r)=>a+r.totalDias,0);
+  const conMovimiento = resultados.filter(r=>r.totalCons>0);
+  const peor = conMovimiento.length ? conMovimiento.slice().sort((a,b)=>b.totalDias-a.totalDias)[0] : resultados[0];
+  const totalDeficit = resultados.reduce((a,r)=>a+Math.max(0,r.totalCons-r.totalIng),0);
+
+  // SELECTOR DE TIPOLOGÍAS
+  const selectorHTML = `
+    <div class="card" style="margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div class="section-title" style="margin:0">Tipologías a analizar</div>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-ghost btn-sm" onclick="selAllTiposAnalisis()">Todas</button>
+          <button class="btn btn-ghost btn-sm" onclick="resetTiposAnalisis()">Predeterminadas</button>
+        </div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">
+        ${todosLosTipos.map(t => {
+          const activo = tiposActivos.includes(t);
+          return `<div onclick="toggleTipoAnalisis('${t}')" style="
+            padding:5px 11px;border-radius:20px;cursor:pointer;font-size:12px;font-weight:600;
+            font-family:var(--mono);transition:all .15s;
+            background:${activo?'var(--accent-dim)':'var(--bg2)'};
+            border:1px solid ${activo?'var(--accent)':'var(--border)'};
+            color:${activo?'var(--accent)':'var(--text2)'};
+          ">${t}</div>`;
+        }).join('')}
+      </div>
+    </div>`;
+
+  // KPIs
+  const kpis = `
+    <div class="grid2" style="margin-bottom:8px">
+      <div class="stat-card accent-danger">
+        <div class="metric-label">Días quiebre total</div>
+        <div class="metric-value" style="color:var(--danger)">${totalDiasQuiebre}</div>
+        <div class="metric-sub">acum. tipologías seleccionadas</div>
+      </div>
+      <div class="stat-card accent-warn">
+        <div class="metric-label">Tipología más crítica</div>
+        <div class="metric-value" style="color:var(--warn);font-size:18px;font-family:var(--mono)">${peor?.tipo||'—'}</div>
+        <div class="metric-sub">${peor?.totalDias||0} días sin stock</div>
+      </div>
+    </div>
+    <div class="grid2" style="margin-bottom:16px">
+      <div class="stat-card">
+        <div class="metric-label">Déficit de ingresos</div>
+        <div class="metric-value" style="font-size:22px">${totalDeficit}</div>
+        <div class="metric-sub">planchas que faltaron</div>
+      </div>
+      <div class="stat-card accent-success">
+        <div class="metric-label">Período analizado</div>
+        <div class="metric-value" style="color:var(--success);font-size:20px;font-family:var(--mono)">${meses.length}</div>
+        <div class="metric-sub">${meses[0]} — ${meses[meses.length-1]}</div>
+      </div>
+    </div>`;
+
+  // Tabla por tipología — sin balance, enfoque en días de parada
+  const tablaRows = resultados.slice().sort((a,b)=>b.totalDias-a.totalDias).map(r => {
+    const pct = r.totalDH > 0 ? (r.totalDias/r.totalDH*100).toFixed(0) : 0;
+    const diasColor = r.totalDias===0 ? 'var(--text3)' : r.totalDias<=5 ? 'var(--warn)' : 'var(--danger)';
+    const barColor  = r.totalDias===0 ? 'var(--success)' : r.totalDias<=5 ? 'var(--warn)' : 'var(--danger)';
+    // Determinar precisión del cálculo
+    const tieneDiario = Object.values(r.porMes).some(m=>m.tieneDiario);
+    const tieneReal   = Object.values(r.porMes).some(m=>m.tieneStockReal);
+    const precisionBadge = tieneDiario
+      ? `<span style="font-size:9px;color:var(--success);font-family:var(--mono)" title="Calculado con datos diarios reales">● EXACTO</span>`
+      : tieneReal
+      ? `<span style="font-size:9px;color:var(--warn);font-family:var(--mono)" title="Estimado con stock inicio + totales mensuales">◐ ESTIMADO</span>`
+      : `<span style="font-size:9px;color:var(--text3);font-family:var(--mono)" title="Sin stock inicio, solo balance mensual">○ APROX.</span>`;
+    const pill = r.totalDias===0
+      ? `<span style="color:var(--success);font-size:11px;font-weight:700">✓ Sin paradas</span>`
+      : r.totalDias<=5
+      ? `<span style="color:var(--warn);font-size:11px;font-weight:700">⚠ ${r.totalDias}d parada</span>`
+      : `<span style="color:var(--danger);font-size:11px;font-weight:700">✖ ${r.totalDias}d parada</span>`;
+    return `<tr>
+      <td><span class="tipo-badge">${r.tipo}</span><br>${precisionBadge}</td>
+      <td style="font-family:var(--mono)">${r.totalCons}</td>
+      <td style="font-family:var(--mono)">${r.totalIng}</td>
+      <td>
+        <span style="color:${diasColor};font-weight:700;font-family:var(--mono);font-size:22px">${r.totalDias}</span>
+        <span style="color:var(--text3);font-size:11px;font-family:var(--mono)"> / ${r.totalDH}d</span>
+        <div style="height:5px;background:var(--bg4);border-radius:3px;margin-top:5px;overflow:hidden">
+          <div style="height:100%;width:${pct}%;background:${barColor};border-radius:3px"></div>
+        </div>
+        <span style="font-size:10px;color:var(--text3)">${pct}% del período</span>
+      </td>
+      <td>${pill}</td>
+    </tr>`;
+  }).join('');
+
+  // Grilla mensual — ahora muestra stock inicio si está disponible
+  const mgHeader = `<tr>
+    <th>Tipología</th>
+    ${meses.map(m=>`<th style="text-align:center">${m.slice(0,3)}</th>`).join('')}
+    <th style="text-align:center">Total</th>
+  </tr>`;
+  const mgRows = resultados.slice().sort((a,b)=>b.totalDias-a.totalDias).map(r => {
+    const cells = meses.map(mes => {
+      const rm = r.porMes[mes];
+      const d = rm?.dias ?? 0;
+      const si = rm?.stockInicio;
+      const c = d===0?'var(--text3)':d<=3?'var(--warn)':'var(--danger)';
+      const bg = d===0?'':d<=3?'#ffb34710':'#ff4d6a10';
+      const esReal = rm?.tieneStockReal;
+      const siStr = si !== null && si !== undefined
+        ? `<div style="font-size:9px;color:${si<0?'var(--danger)':'var(--text3)'}">ini:${si>=0?'+':''}${si}</div>`
+        : '';
+      return `<td style="text-align:center;background:${bg};font-family:var(--mono);font-size:12px;color:${c};font-weight:${d>0?700:400};padding:6px 8px">
+        ${d===0?'—':d+'d'}${!esReal&&d>0?'<span title="Estimado, sin stock real">*</span>':''}
+        ${siStr}
+      </td>`;
+    }).join('');
+    const totColor = r.totalDias===0?'var(--text3)':r.totalDias<=5?'var(--warn)':'var(--danger)';
+    return `<tr>
+      <td><span class="tipo-badge">${r.tipo}</span></td>
+      ${cells}
+      <td style="text-align:center;font-weight:700;font-family:var(--mono);color:${totColor}">${r.totalDias===0?'—':r.totalDias+'d'}</td>
+    </tr>`;
+  }).join('');
+
+  return `
+    ${renderMonthFilter('analisis')}
+
+    ${selectorHTML}
+
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div style="font-size:12px;color:var(--text2)">${tiposActivos.length} tipologías · ${meses.join(' · ')}</div>
+      <button class="btn btn-accent btn-sm" onclick="exportPDFAnalisis()">📄 Informe PDF</button>
+    </div>
+
+    ${kpis}
+
+    <div class="card" style="margin-bottom:12px">
+      <div class="section-title" style="margin-bottom:12px">Resumen por tipología</div>
+      <div style="overflow-x:auto">
+        <table class="data-table">
+          <thead><tr>
+            <th>Tipología</th><th>Consumo</th><th>Ingresos</th><th>Días máquina parada</th><th>Estado</th>
+          </tr></thead>
+          <tbody>${tablaRows}</tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:12px">
+      <div class="section-title" style="margin-bottom:12px">Días de quiebre por mes</div>
+      <div style="overflow-x:auto">
+        <table class="data-table">
+          <thead>${mgHeader}</thead>
+          <tbody>${mgRows}</tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:12px">
+      <div class="section-title">Días con stock ≤ 0 por tipología</div>
+      <div class="chart-wrap" style="height:200px"><canvas id="chartAnalisisBar"></canvas></div>
+    </div>
+    <div class="card" style="margin-bottom:12px">
+      <div class="section-title">Consumo vs Ingresos — período completo</div>
+      <div class="chart-wrap" style="height:200px"><canvas id="chartAnalisisCI"></canvas></div>
+    </div>
+
+    <div class="card" style="margin-bottom:12px;border-color:var(--border2)">
+      <div class="section-title">📐 Metodología — 3 niveles de precisión</div>
+      <div style="font-size:12px;color:var(--text2);line-height:1.8">
+        <span style="color:var(--success);font-family:var(--mono);font-weight:700">● EXACTO</span> — Lee consumo día a día del Excel. Por cada día con consumo registrado: si stock ≤ 0 → máquina parada. Los ingresos <em>no</em> se suman al inicio — llegan cuando llegan.<br>
+        <span style="color:var(--warn);font-family:var(--mono);font-weight:700">◐ ESTIMADO</span> — Tiene stock inicio pero sin columnas diarias. Si <strong>stock_inicio ≤ 0 → parada todo el mes</strong>. Si &gt; 0 → calcula día de agotamiento linealmente. Los ingresos <em>no</em> se asumen al inicio.<br>
+        <span style="color:var(--text3);font-family:var(--mono);font-weight:700">○ APROX.</span> — Sin stock inicio. Estima por déficit mensual (consumo &gt; ingresos).<br>
+        <br>
+        <strong>Criterio clave:</strong> los ingresos no "salvan" los días anteriores a su llegada. Si el mes arrancó con stock negativo, esos días son paradas reales independientemente de cuánto ingresó después.
+      </div>
+    </div>`;
+}
+function initAnalisisCharts() {
+  const resultados = getTiposSeleccionados().map(calcStockCeroTipo);
+  const sortedRes = resultados.slice().sort((a,b)=>b.totalDias-a.totalDias);
+
+  const isDark = document.documentElement.getAttribute('data-theme') !== 'light';
+  const tickColor = isDark ? '#888898' : '#555577';
+  const gridColor = isDark ? '#252530' : '#d0d8ee';
+
+  // Chart 1: Bar días sin stock
+  const ctxBar = document.getElementById('chartAnalisisBar');
+  if (ctxBar && !state.charts.analisisBar) {
+    state.charts.analisisBar = new Chart(ctxBar, {
+      type: 'bar',
+      data: {
+        labels: sortedRes.map(r=>r.tipo),
+        datasets: [{
+          label: 'Días con stock ≤ 0',
+          data: sortedRes.map(r=>r.totalDias),
+          backgroundColor: sortedRes.map(r=> r.totalDias===0?'#00e5a033': r.totalDias<=5?'#ffb34766':'#ff4d6a99'),
+          borderColor: sortedRes.map(r=> r.totalDias===0?'#00e5a0': r.totalDias<=5?'#ffb347':'#ff4d6a'),
+          borderWidth: 2, borderRadius: 5,
+        }]
+      },
+      options: {
+        responsive:true, maintainAspectRatio:false,
+        plugins:{ legend:{display:false}, tooltip:{callbacks:{label:c=>`${c.raw} días sin stock`}} },
+        scales:{
+          x:{ticks:{color:tickColor},grid:{color:gridColor}},
+          y:{ticks:{color:tickColor},grid:{color:gridColor},beginAtZero:true}
+        }
+      }
+    });
+  }
+
+  // Chart 2: Bar agrupado consumo vs ingresos
+  const ctxCI = document.getElementById('chartAnalisisCI');
+  if (ctxCI && !state.charts.analisisCI) {
+    state.charts.analisisCI = new Chart(ctxCI, {
+      type: 'bar',
+      data: {
+        labels: resultados.map(r=>r.tipo),
+        datasets: [
+          {label:'Consumo', data:resultados.map(r=>r.totalCons), backgroundColor:'#ff4d6a66', borderColor:'#ff4d6a', borderWidth:2, borderRadius:4},
+          {label:'Ingresos', data:resultados.map(r=>r.totalIng), backgroundColor:'#00e5a066', borderColor:'#00e5a0', borderWidth:2, borderRadius:4},
+        ]
+      },
+      options: {
+        responsive:true, maintainAspectRatio:false,
+        plugins:{ legend:{labels:{color:tickColor,font:{size:11},boxWidth:12,padding:10}} },
+        scales:{
+          x:{ticks:{color:tickColor},grid:{color:gridColor}},
+          y:{ticks:{color:tickColor},grid:{color:gridColor},beginAtZero:true}
+        }
+      }
+    });
+  }
+}
+
+function exportPDFAnalisis() {
+  const {jsPDF} = window.jspdf;
+  const doc = new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+  const W = doc.internal.pageSize.getWidth();
+  const H = doc.internal.pageSize.getHeight();
+  const meses = getMeses();
+  const resultados = getTiposSeleccionados().map(calcStockCeroTipo);
+  const totalDiasQuiebre = resultados.reduce((a,r)=>a+r.totalDias,0);
+  const peor = resultados.slice().sort((a,b)=>b.totalDias-a.totalDias)[0];
+  const totalDeficit = resultados.reduce((a,r)=>a+Math.max(0,r.totalCons-r.totalIng),0);
+
+  let y = 0;
+
+  // HEADER
+  doc.setFillColor(10,10,15);
+  doc.rect(0,0,W,46,'F');
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(8);
+  doc.setTextColor(0,229,255);
+  doc.text('VIDRIOS LFDA · ANÁLISIS DE ABASTECIMIENTO', 14, 12);
+  doc.setFontSize(20);
+  doc.setTextColor(255,255,255);
+  doc.text('Días con Stock Cero por Tipología', 14, 26);
+  doc.setFont('helvetica','normal');
+  doc.setFontSize(9);
+  doc.setTextColor(136,136,152);
+  doc.text(`Período: ${meses.join(' · ')}  ·  Generado: ${new Date().toLocaleDateString('es-AR')}`, 14, 36);
+  doc.text(`Preparado por: ${state.user?.nombre||'Usuario'} (${state.user?.cargo||''})`, 14, 43);
+  doc.setDrawColor(0,229,255);
+  doc.setLineWidth(0.8);
+  doc.line(0,46,W,46);
+  y = 54;
+
+  // ALERT BANNER
+  doc.setFillColor(255,77,106);
+  doc.roundedRect(14,y,W-28,14,2,2,'F');
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(11);
+  doc.setTextColor(255,255,255);
+  doc.text(`⚠  ${totalDiasQuiebre} días acumulados de stock cero · Tipología más crítica: ${peor.tipo} (${peor.totalDias}d)`, 20, y+9.5);
+  y += 20;
+
+  // KPIs
+  const kpiDefs = [
+    {label:'DÍAS QUIEBRE TOTAL', value:String(totalDiasQuiebre), color:[255,77,106]},
+    {label:'TIPOLOGÍA MÁS CRÍTICA', value:peor.tipo, color:[255,179,71]},
+    {label:'DÉFICIT DE INGRESOS', value:totalDeficit+' pl.', color:[0,229,255]},
+    {label:'MESES ANALIZADOS', value:String(meses.length), color:[0,229,160]},
+  ];
+  const kw = (W-28)/4 - 2;
+  kpiDefs.forEach((k,i) => {
+    const kx = 14 + i*(kw+2.67);
+    doc.setFillColor(17,17,40);
+    doc.roundedRect(kx,y,kw,22,2,2,'F');
+    doc.setFillColor(...k.color);
+    doc.roundedRect(kx,y,kw,2,1,1,'F');
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(6.5);
+    doc.setTextColor(136,136,152);
+    doc.text(k.label, kx+4, y+8);
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(k.value.length>5?11:13);
+    doc.setTextColor(...k.color);
+    doc.text(k.value, kx+4, y+18);
+  });
+  y += 28;
+
+  // METODOLOGÍA
+  doc.setFillColor(17,17,40);
+  doc.roundedRect(14,y,W-28,20,2,2,'F');
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(8);
+  doc.setTextColor(0,229,255);
+  doc.text('METODOLOGÍA DE CÁLCULO', 20, y+6);
+  doc.setFont('helvetica','normal');
+  doc.setFontSize(7.5);
+  doc.setTextColor(200,200,220);
+  doc.text('Los Excel registran totales mensuales, no registros diarios. Días quiebre = ROUND(Déficit ÷ Consumo diario)', 20, y+12);
+  doc.text('Consumo neto = Consumo − Desc. daños − Desc. proveedor  ·  Déficit = MAX(0, Consumo neto − Ingresos)', 20, y+18);
+  y += 26;
+
+  // TABLA PRINCIPAL
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(11);
+  doc.setTextColor(0,229,255);
+  doc.text('01 — Resumen por Tipología', 14, y);
+  y += 4;
+
+  const tableRows = resultados.slice().sort((a,b)=>b.totalDias-a.totalDias).map(r => {
+    const pct = r.totalDH>0?(r.totalDias/r.totalDH*100).toFixed(0)+'%':'0%';
+    const bal = (r.balance>=0?'+':'')+r.balance;
+    const status = r.totalDias===0?'OK':r.totalDias<=5?'Atención':'CRÍTICO';
+    return [r.tipo, r.totalCons, r.totalIng, bal, `${r.totalDias} de ${r.totalDH}d`, pct, status];
+  });
+
+  doc.autoTable({
+    head:[['Tipología','Consumo','Ingresos','Balance','Días ≤ 0 stock','% período','Estado']],
+    body: tableRows,
+    startY: y,
+    styles:{fontSize:9,cellPadding:4,textColor:[30,30,50]},
+    headStyles:{fillColor:[0,229,255],textColor:[0,0,0],fontStyle:'bold',fontSize:9},
+    alternateRowStyles:{fillColor:[245,247,255]},
+    columnStyles:{
+      0:{fontStyle:'bold',textColor:[0,100,140]},
+      3:{halign:'center'},
+      4:{halign:'center',fontStyle:'bold'},
+      5:{halign:'center'},
+      6:{halign:'center',fontStyle:'bold'},
+    },
+    didParseCell(data){
+      if(data.section==='body'&&data.column.index===6){
+        const v=data.cell.text[0];
+        if(v==='CRÍTICO'){data.cell.styles.textColor=[200,50,50];}
+        else if(v==='Atención'){data.cell.styles.textColor=[180,120,0];}
+        else{data.cell.styles.textColor=[0,140,80];}
+      }
+      if(data.section==='body'&&data.column.index===3){
+        if(data.cell.text[0].startsWith('-'))data.cell.styles.textColor=[200,50,50];
+        else data.cell.styles.textColor=[0,140,80];
+      }
+    },
+    margin:{left:14,right:14},
+  });
+  y = doc.lastAutoTable.finalY + 8;
+
+  // GRILLA MENSUAL
+  if(y>210){doc.addPage();y=14;}
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(11);
+  doc.setTextColor(0,229,255);
+  doc.text('02 — Días con stock ≤ 0 por mes y tipología', 14, y);
+  y += 4;
+
+  const mesHead = ['Tipología', ...meses.map(m=>m.slice(0,3).toUpperCase()), 'TOTAL'];
+  const mesBody = resultados.slice().sort((a,b)=>b.totalDias-a.totalDias).map(r => [
+    r.tipo,
+    ...meses.map(mes=>{ const d=r.porMes[mes]?.dias??0; return d===0?'—':d+'d'; }),
+    r.totalDias===0?'—':r.totalDias+'d'
+  ]);
+
+  doc.autoTable({
+    head:[mesHead],
+    body:mesBody,
+    startY:y,
+    styles:{fontSize:9,cellPadding:4,halign:'center',textColor:[30,30,50]},
+    headStyles:{fillColor:[0,229,255],textColor:[0,0,0],fontStyle:'bold',fontSize:9},
+    columnStyles:{0:{fontStyle:'bold',textColor:[0,100,140],halign:'left'}},
+    alternateRowStyles:{fillColor:[245,247,255]},
+    didParseCell(data){
+      if(data.section==='body'&&data.column.index>0){
+        const v=data.cell.text[0];
+        if(v!=='—'){
+          const n=parseInt(v);
+          if(n>5)data.cell.styles.textColor=[200,50,50];
+          else if(n>0)data.cell.styles.textColor=[180,120,0];
+        }
+      }
+    },
+    margin:{left:14,right:14},
+  });
+  y = doc.lastAutoTable.finalY + 8;
+
+  // GRÁFICOS
+  if(y>200){doc.addPage();y=14;}
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(11);
+  doc.setTextColor(0,229,255);
+  doc.text('03 — Gráficos', 14, y);
+  y += 4;
+
+  const charts = ['chartAnalisisBar','chartAnalisisCI'];
+  const cw = (W-28)/2 - 2;
+  charts.forEach((id,i) => {
+    const canvas = document.getElementById(id);
+    if(!canvas) return;
+    try {
+      const img = canvas.toDataURL('image/png');
+      const ratio = canvas.width/canvas.height;
+      const ch = Math.min(cw/ratio, 65);
+      const cx = 14 + i*(cw+4);
+      if(y+ch+4>H-20){doc.addPage();y=14;}
+      doc.setFillColor(17,17,40);
+      doc.roundedRect(cx,y,cw,ch+4,2,2,'F');
+      doc.addImage(img,'PNG',cx+1,y+2,cw-2,ch);
+      if(i===1) y += ch + 10;
+    } catch(e){}
+  });
+
+  // CONCLUSIONES
+  if(y>220){doc.addPage();y=14;}
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(11);
+  doc.setTextColor(0,229,255);
+  doc.text('04 — Conclusiones y recomendaciones', 14, y);
+  y += 6;
+
+  const criticos = resultados.filter(r=>r.totalDias>5);
+  const warnings = resultados.filter(r=>r.totalDias>0&&r.totalDias<=5);
+  const oks = resultados.filter(r=>r.totalDias===0&&r.totalCons>0);
+
+  const concls = [];
+  if(criticos.length) concls.push({
+    color:[255,77,106],
+    title:`ESTADO CRÍTICO (${criticos.length} tipología${criticos.length>1?'s':''})`,
+    body: criticos.map(r=>`${r.tipo}: ${r.totalDias} días sin stock (${(r.totalDias/r.totalDH*100).toFixed(0)}% del período)`).join('  ·  ')
+  });
+  if(warnings.length) concls.push({
+    color:[255,179,71],
+    title:`ATENCIÓN (${warnings.length} tipología${warnings.length>1?'s':''})`,
+    body: warnings.map(r=>`${r.tipo}: ${r.totalDias}d sin stock`).join('  ·  ')
+  });
+  if(oks.length) concls.push({
+    color:[0,229,160],
+    title:'SIN QUIEBRES DE STOCK',
+    body: oks.map(r=>r.tipo).join('  ·  ') + ' — abastecidas todo el período'
+  });
+  concls.push({
+    color:[0,229,255],
+    title:'ACCIÓN RECOMENDADA',
+    body: `Revisar plan de reposición para ${peor.tipo}${criticos.length>1?' y '+criticos.filter(r=>r.tipo!==peor.tipo).map(r=>r.tipo).join(', '):''}.`+
+          ` Establecer stock mínimo de seguridad ≥ 2 semanas de consumo promedio. Aumentar frecuencia de pedidos a proveedor.`
+  });
+
+  concls.forEach(c => {
+    const lines = doc.splitTextToSize(c.body, W-46);
+    const bh = 9 + lines.length*5;
+    if(y+bh>H-20){doc.addPage();y=14;}
+    doc.setFillColor(17,17,40);
+    doc.roundedRect(14,y,W-28,bh,2,2,'F');
+    doc.setFillColor(...c.color);
+    doc.roundedRect(14,y,3,bh,1,1,'F');
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(9);
+    doc.setTextColor(...c.color);
+    doc.text(c.title, 22, y+6);
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(8.5);
+    doc.setTextColor(200,200,220);
+    lines.forEach((l,li)=>doc.text(l, 22, y+11+li*5));
+    y += bh+4;
+  });
+
+  // PIE DE PÁGINA
+  const pc = doc.internal.getNumberOfPages();
+  for(let i=1;i<=pc;i++){
+    doc.setPage(i);
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(80,80,100);
+    doc.text(`VIDRIOS LFDA · Análisis Stock Cero · ${new Date().toLocaleDateString('es-AR')}`, 14, H-6);
+    doc.text(`Pág. ${i} / ${pc}`, W-14, H-6, {align:'right'});
+    doc.setDrawColor(37,37,48);
+    doc.setLineWidth(0.3);
+    doc.line(0,H-10,W,H-10);
+  }
+
+  doc.save(`AnalisisStockCero_LFDA_${new Date().toISOString().slice(0,10)}.pdf`);
+  toast('📄 Informe PDF exportado ✓');
+}
 
 // ===== THEME =====
 function toggleTheme() {
