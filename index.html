@@ -467,7 +467,8 @@ function injectPreloadedStock() {
   Object.entries(PRELOADED_DATA).forEach(([mes, pd]) => {
     if (!state.data[mes]) return;
     // Solo inyectar stock_inicio/final si el Excel no trajo solapas diarias
-    const tieneDiario = state.data[mes].stock_por_dia && Object.keys(state.data[mes].stock_por_dia).length > 0;
+    const tieneDiario = (state.data[mes].movimientos_dia && Object.keys(state.data[mes].movimientos_dia).length > 0) ||
+                        (state.data[mes].stock_por_dia  && Object.keys(state.data[mes].stock_por_dia).length  > 0);
     if (!tieneDiario) {
       if (pd.stock_inicio && Object.keys(pd.stock_inicio).length > 0)
         state.data[mes].stock_inicio = pd.stock_inicio;
@@ -1649,66 +1650,138 @@ async function processExcelFile(file) {
 
     const data = {consumo:{},descuentos_daños:{},descuentos_proveedor:{},ingresos:{},stock_inicio:{},stock_por_dia:{}};
 
-    // ── RESUMEN APP: totales mensuales ──────────────────────────────────────
-    const resumenSheet = wb.SheetNames.find(s=>s.toUpperCase().trim()==='RESUMEN APP');
-    if(resumenSheet) {
-      const ws = wb.Sheets[resumenSheet];
-      const rows = XLSX.utils.sheet_to_json(ws, {header:1,defval:null});
-      rows.slice(3).forEach(row => {
-        if(!row||!row[0]) return;
-        const tipo = String(row[0]).trim();
-        if(!tipo || tipo==='' || tipo.toUpperCase()==='TIPOLOGÍA' || tipo.toUpperCase()==='TOTAL') return;
-        const consumo = parseNum(row[1]) || 0;
-        const roturas = parseNum(row[2]) || 0;
-        const falla_p = parseNum(row[3]) || 0;
-        const ingreso = parseNum(row[4]) || 0;
-        const st_ini  = parseNum(row[5]);
-        if(consumo>0) data.consumo[tipo] = (data.consumo[tipo]||0) + consumo;
-        if(roturas>0) data.descuentos_daños[tipo] = (data.descuentos_daños[tipo]||0) + roturas;
-        if(falla_p>0) data.descuentos_proveedor[tipo] = (data.descuentos_proveedor[tipo]||0) + falla_p;
-        if(ingreso>0) data.ingresos[tipo] = (data.ingresos[tipo]||0) + ingreso;
-        if(st_ini !== null) data.stock_inicio[tipo] = st_ini;
-      });
+    // ── ESTRUCTURA DE CADA SOLAPA DIARIA ─────────────────────────────────
+    // Col A(0)=tipo, B(1)=stock inicio día, C-J(2-9)=consumo x pieza,
+    // K(10)=roturas/daños, L(11)=falla proveedor, M(12)=total consumo,
+    // N(13)=ingresos, O(14)=stock día siguiente (fórmula =B+N-M)
+    // Datos desde fila 9 (índice 8)
 
-      // ── SOLAPAS DIARIAS: "1", "2", ... "31" ────────────────────────────
-      // Cada solapa = un día del mes. Col A = tipología, Col B = stock de ese día.
-      // stock_por_dia[tipo] = { 1: stockDia1, 2: stockDia2, ... }
-      const mesNum = MESES_NUMERO[mes]; // 0=ene, 3=abr, etc.
-      wb.SheetNames.forEach(sheetName => {
-        const diaNum = parseInt(sheetName.trim(), 10);
-        if(isNaN(diaNum) || diaNum < 1 || diaNum > 31) return; // solo solapas numéricas
-        try {
-          const wsDia = wb.Sheets[sheetName];
-          const rowsDia = XLSX.utils.sheet_to_json(wsDia, {header:1, defval:null, raw:true});
-          rowsDia.forEach(row => {
-            if(!row || !row[0]) return;
-            const tipo = String(row[0]).trim();
-            if(!tipo || tipo.length < 2) return;
-            const up = tipo.toUpperCase();
-            if(up==='TIP'||up==='DE'||up==='VIDRIOS'||up==='TOTAL'||up==='TIPOLOGÍA') return;
-            if(/^[\d\s\/\-]+$/.test(tipo)) return;
-            // Col B (índice 1) = stock del día
-            const stockDia = parseNum(row[1]);
-            if(stockDia === null) return;
+    const COL_TIPO    = 0;   // A
+    const COL_STOCK_B = 1;   // B — stock inicio del día (solo numérico en día 1; resto son fórmulas)
+    const COL_CONS_INI= 2;   // C — inicio consumo diario
+    const COL_CONS_FIN= 9;   // J — fin consumo diario (C a J = 8 piezas)
+    const COL_ROTURAS = 10;  // K — descuento daños/roturas
+    const COL_FALLA   = 11;  // L — falla proveedor
+    // col M(12) = SUM(C:L) — fórmula, no usar
+    const COL_INGRESO = 13;  // N — ingresos del día
+    // col O(14) = stock día siguiente — fórmula =B+N-M
+    const FILA_DATOS  = 8;   // datos desde fila 9 (índice 8)
+
+    // Leer TODAS las solapas numéricas (1-31 = cada día del mes)
+    const solapasNumericas = wb.SheetNames
+      .filter(s => { const n=parseInt(s.trim(),10); return !isNaN(n) && n>=1 && n<=31; })
+      .sort((a,b)=>parseInt(a)-parseInt(b));
+    const primerDia = solapasNumericas.length > 0 ? parseInt(solapasNumericas[0]) : 1;
+
+    solapasNumericas.forEach(sheetName => {
+      const diaNum = parseInt(sheetName.trim(), 10);
+      try {
+        const wsDia = wb.Sheets[sheetName];
+        const rowsDia = XLSX.utils.sheet_to_json(wsDia, {header:1, defval:null, raw:true});
+
+        rowsDia.slice(FILA_DATOS).forEach(row => {
+          if(!row || !row[COL_TIPO]) return;
+          const tipo = String(row[COL_TIPO]).trim();
+          if(!tipo || tipo.length < 2) return;
+          const up = tipo.toUpperCase();
+          if(up==='TIP'||up==='DE'||up==='VIDRIOS'||up==='TOTAL'||up==='TIPOLOGÍA') return;
+          if(/^[\d\s\/\-]+$/.test(tipo)) return;
+
+          const stockB  = (typeof row[COL_STOCK_B] === 'number') ? row[COL_STOCK_B] : null;
+          // Sumar consumo cols C-J (índices 2-9) + roturas K(10) + falla L(11) directamente
+          let consumo = 0;
+          for(let c=COL_CONS_INI; c<=COL_CONS_FIN; c++) {
+            if(typeof row[c]==='number') consumo += row[c];
+          }
+          const roturas = (typeof row[COL_ROTURAS]==='number') ? row[COL_ROTURAS] : 0;
+          const falla   = (typeof row[COL_FALLA]==='number')   ? row[COL_FALLA]   : 0;
+          const ingreso = (typeof row[COL_INGRESO]==='number') ? row[COL_INGRESO] : 0;
+
+          // Acumular totales mensuales
+          if(consumo > 0) data.consumo[tipo] = (data.consumo[tipo]||0) + consumo;
+          if(roturas > 0) data.descuentos_daños[tipo] = (data.descuentos_daños[tipo]||0) + roturas;
+          if(falla   > 0) data.descuentos_proveedor[tipo] = (data.descuentos_proveedor[tipo]||0) + falla;
+          if(ingreso > 0) data.ingresos[tipo] = (data.ingresos[tipo]||0) + ingreso;
+
+          // Stock inicio del primer día del mes = col B del día 1 (único numérico)
+          if(diaNum === primerDia && stockB !== null) {
+            data.stock_inicio[tipo] = stockB;
+          }
+
+          // Para stock_por_dia: solo guardamos col B del día 1 (real).
+          // Los demás se calculan acumulativamente en calcStockCeroMesConStock.
+          if(diaNum === primerDia && stockB !== null) {
             if(!data.stock_por_dia[tipo]) data.stock_por_dia[tipo] = {};
-            data.stock_por_dia[tipo][diaNum] = stockDia;
-          });
-        } catch(eDia) { console.warn('Error leyendo solapa', sheetName, eDia); }
-      });
+            data.stock_por_dia[tipo][diaNum] = stockB;
+          }
 
-      state.data[mes] = data;
-      state.selectedMonths = Object.keys(state.data).sort((a,b)=>MESES_ORDER.indexOf(a)-MESES_ORDER.indexOf(b));
-      saveToStorage();
+          // Guardamos movimientos diarios para reconstruir stock día a día
+          if(!data.movimientos_dia) data.movimientos_dia = {};
+          if(!data.movimientos_dia[tipo]) data.movimientos_dia[tipo] = {};
+          data.movimientos_dia[tipo][diaNum] = {
+            consumo: consumo + roturas + falla, // total salidas del día
+            ingreso
+          };
+        });
+      } catch(eDia) { console.warn('Error leyendo solapa', sheetName, eDia); }
+    });
+
+    // Reconstruir stock día a día desde stock_inicio + movimientos diarios
+    if(data.movimientos_dia) {
+      Object.keys(data.movimientos_dia).forEach(tipo => {
+        const stockIni = data.stock_inicio[tipo];
+        if(stockIni === undefined && stockIni !== 0) return;
+        let stock = stockIni;
+        const diasOrdenados = Object.keys(data.movimientos_dia[tipo]).map(Number).sort((a,b)=>a-b);
+        if(!data.stock_por_dia[tipo]) data.stock_por_dia[tipo] = {};
+        diasOrdenados.forEach(dia => {
+          // stock al INICIO del día = stock antes de los movimientos de ese día
+          data.stock_por_dia[tipo][dia] = stock;
+          const mov = data.movimientos_dia[tipo][dia];
+          stock = stock + (mov.ingreso||0) - (mov.consumo||0);
+        });
+      });
+    }
+
+    // Si no hay solapas numéricas, intentar RESUMEN APP como fallback
+    if(solapasNumericas.length === 0) {
+      const resumenSheet = wb.SheetNames.find(s=>s.toUpperCase().trim()==='RESUMEN APP');
+      if(resumenSheet) {
+        const ws = wb.Sheets[resumenSheet];
+        const rows = XLSX.utils.sheet_to_json(ws, {header:1,defval:null});
+        rows.slice(3).forEach(row => {
+          if(!row||!row[0]) return;
+          const tipo = String(row[0]).trim();
+          if(!tipo||tipo.toUpperCase()==='TIPOLOGÍA'||tipo.toUpperCase()==='TOTAL') return;
+          const consumo = parseNum(row[1])||0;
+          const roturas = parseNum(row[2])||0;
+          const falla   = parseNum(row[3])||0;
+          const ingreso = parseNum(row[4])||0;
+          const st_ini  = parseNum(row[5]);
+          if(consumo>0) data.consumo[tipo]=(data.consumo[tipo]||0)+consumo;
+          if(roturas>0) data.descuentos_daños[tipo]=(data.descuentos_daños[tipo]||0)+roturas;
+          if(falla>0)   data.descuentos_proveedor[tipo]=(data.descuentos_proveedor[tipo]||0)+falla;
+          if(ingreso>0) data.ingresos[tipo]=(data.ingresos[tipo]||0)+ingreso;
+          if(st_ini!==null) data.stock_inicio[tipo]=st_ini;
+        });
+      }
+    }
+
+    // Verificar que haya datos
+    const tieneDatos = Object.keys(data.consumo).length > 0 || Object.keys(data.stock_inicio).length > 0;
+    if(!tieneDatos) {
+      if(statusEl){statusEl.textContent='⚠️ Sin datos legibles';statusEl.style.color='var(--warn)';}
+      toast('⚠️ No se pudieron leer datos del Excel');
+      return;
+    }
+
+    state.data[mes] = data;
+    state.selectedMonths = Object.keys(state.data).sort((a,b)=>MESES_ORDER.indexOf(a)-MESES_ORDER.indexOf(b));
+    saveToStorage();
       if(statusEl){statusEl.textContent='✓ Procesado';statusEl.style.color='var(--success)';}
       toast(mes+' cargado ✓');
       renderTab();
       return;
-    }
-
-    // Fallback: no RESUMEN APP — show warning
-    if(statusEl){statusEl.textContent='⚠️ Sin solapa RESUMEN APP';statusEl.style.color='var(--warn)';}
-    toast('⚠️ El archivo no tiene solapa RESUMEN APP. Usá los Excel actualizados.');
-    return; // dummy to close the old block
   } catch(e) {
     console.error(e);
     if(statusEl) {statusEl.textContent='❌ Error';statusEl.style.color='var(--danger)';}
@@ -2579,12 +2652,51 @@ function calcStockCeroMesConStock(mes, tipo, stockInicioOverride) {
                     : (stockInicioOverride != null) ? stockInicioOverride
                     : null;
 
-  // ── MODO EXACTO: tenemos stock_por_dia (solapas diarias del Excel) ────────
+  // ── MODO EXACTO: tenemos movimientos_dia (solapas diarias del Excel) ────────
+  const movDia = d.movimientos_dia?.[tipo] ||
+    d.movimientos_dia?.[tipo?.replace('L4+4BSL','L4+4 BSL')] ||
+    d.movimientos_dia?.[tipo?.replace('L4+4 BSL','L4+4BSL')] || null;
+
+  if (movDia && stockInicio !== null) {
+    const mesNum = MESES_NUMERO[mes];
+    const año    = AÑO_ANALISIS;
+    let stock = stockInicio;
+    let diasParada = 0;
+    const diasDetalle = [];
+
+    Object.keys(movDia).map(Number).sort((a,b)=>a-b).forEach(dia => {
+      // ¿Es día hábil?
+      const dow = new Date(año, mesNum, dia).getDay();
+      if(dow === 0 || dow === 6) { // fin de semana — igual actualizar stock
+        const m = movDia[dia];
+        stock = stock + (m.ingreso||0) - (m.consumo||0);
+        return;
+      }
+      const key = String(mesNum+1).padStart(2,'0')+'-'+String(dia).padStart(2,'0');
+      if(FERIADOS_2026.has(key)) { // feriado
+        const m = movDia[dia];
+        stock = stock + (m.ingreso||0) - (m.consumo||0);
+        return;
+      }
+      // Stock al INICIO del día hábil
+      if(stock <= 0) {
+        diasParada++;
+        diasDetalle.push(dia);
+      }
+      const m = movDia[dia];
+      stock = stock + (m.ingreso||0) - (m.consumo||0);
+    });
+
+    return {consumo:cons, consNeto, ingresos:ing, stockInicio,
+            stockFinal:stock, dias:diasParada, diasDetalle, dh,
+            tieneStockReal:true, tieneDiario:true};
+  }
+
+  // ── MODO EXACTO legacy: stock_por_dia precalculado ───────────────────────
   const stockDias = d.stock_por_dia ? (
     d.stock_por_dia[tipo] ||
     d.stock_por_dia[tipo?.replace('L4+4BSL','L4+4 BSL')] ||
-    d.stock_por_dia[tipo?.replace('L4+4 BSL','L4+4BSL')] ||
-    null
+    d.stock_por_dia[tipo?.replace('L4+4 BSL','L4+4BSL')] || null
   ) : null;
 
   if (stockDias && Object.keys(stockDias).length > 0) {
