@@ -1644,7 +1644,7 @@ function renderPedidos() {
             ${p.fecha?` · ${new Date(p.fecha).toLocaleDateString('es-AR')}`:''}
           </div>
         </div>
-        <button onclick="eliminarPedido(${i})" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:16px">🗑️</button>
+        ${state.user?.rol==='admin' ? `<button onclick="eliminarPedido(${i})" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:16px">🗑️</button>` : ''}
       </div>`).join('')}`;
 }
 
@@ -1672,6 +1672,7 @@ function togglePedido(i) {
   saveToStorage(); renderTab();
 }
 function eliminarPedido(i) {
+  if(state.user?.rol !== 'admin') { toast('Sin permisos'); return; }
   if(confirm('¿Eliminar pedido?')){state.pedidos.splice(i,1);saveToStorage();renderTab();}
 }
 
@@ -2173,6 +2174,7 @@ function eliminarMes(mes) {
 
 // ===== UPLOAD EXCEL =====
 function mostrarSubirArchivo() {
+  if(state.user?.rol !== 'admin') { toast('Sin permisos'); return; }
   document.getElementById('modalSubir').style.display='flex';
 }
 function cerrarModalSubir() {
@@ -2716,7 +2718,7 @@ function renderReclamos() {
       ${meses.map(m=>`<div class="month-chip ${selMes===m?'active':''}" onclick="selReclamoMes('${m}')">${m}</div>`).join('')}
     </div>
     ${selMes!=='todos'?`<div style="margin-bottom:12px">
-      <button class="btn btn-danger btn-sm" onclick="eliminarReclamosMes('${selMes}')">🗑️ Borrar todos los reclamos de ${selMes}</button>
+      ${state.user?.rol==='admin' ? `<button class="btn btn-danger btn-sm" onclick="eliminarReclamosMes('${selMes}')">🗑️ Borrar todos los reclamos de ${selMes}</button>` : ''}
     </div>`:''}
 
     <!-- Summary cards -->
@@ -2781,7 +2783,7 @@ function renderReclamos() {
               <td style="color:var(--danger)">${r.perdidoPct!==null?r.perdidoPct+'%':'?'}</td>
               <td style="font-size:11px;font-family:var(--mono)">${r.nroReclamo||'-'}</td>
               <td style="font-size:11px">${r.observaciones||'-'}</td>
-              <td><button onclick="eliminarReclamo(${i})" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:14px">🗑️</button></td>
+              ${state.user?.rol==='admin' ? `<td><button onclick="eliminarReclamo(${i})" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:14px">🗑️</button></td>` : '<td></td>'}
             </tr>`).join('')}
           </tbody>
         </table>
@@ -2797,6 +2799,7 @@ function selReclamoMes(mes) {
 }
 
 function eliminarReclamosMes(mes) {
+  if(state.user?.rol !== 'admin') { toast('Sin permisos'); return; }
   const count = state.reclamos.filter(r=>r.mes===mes).length;
   if(confirm(`¿Borrar los ${count} reclamos de ${mes}? Esta acción no se puede deshacer.`)) {
     state.reclamos = state.reclamos.filter(r=>r.mes!==mes);
@@ -2807,6 +2810,7 @@ function eliminarReclamosMes(mes) {
 }
 
 function eliminarReclamo(idx) {
+  if(state.user?.rol !== 'admin') { toast('Sin permisos'); return; }
   const recs = getReclamosFiltrados();
   const rec = recs[idx];
   const globalIdx = state.reclamos.indexOf(rec);
