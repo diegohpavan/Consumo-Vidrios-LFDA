@@ -786,7 +786,10 @@ async function saveToFirebase() {
 // ===== LOGIN =====
 function renderLogin() {
   const g = document.getElementById('userGrid');
-  g.innerHTML = getUsuarios().map((u,i) => `
+  if(!g) return;
+  // Fallback defensivo: si config no cargó todavía, usar USERS hardcodeados
+  const lista = (state?.config?.usuarios) || USERS;
+  g.innerHTML = lista.map((u,i) => `
     <button class="user-btn" id="ub${i}" onclick="selUser(${i})">
       <div class="user-avatar" style="background:${u.color}22;color:${u.color}">${u.emoji}</div>
       <div class="user-name">${u.nombre}</div>
@@ -2153,6 +2156,7 @@ async function cargarConfig() {
       localStorage.setItem('sv_config', JSON.stringify(state.config));
     }
   } catch(e) { console.warn('Error cargando config:', e); }
+}
 
 function eliminarMes(mes) {
   if(state.user?.rol !== 'admin') { toast('Sin permisos'); return; }
