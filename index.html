@@ -474,7 +474,7 @@ input:checked+.slider:before{transform:translateX(18px);background:#000}
 const state = {
   user: null,
   tab: 'inicio',
-  data: {}, // { "Enero": {consumo, descuentos_daños, descuentos_proveedor, ingresos, stock_final}, ... }
+  data: {},
   selectedMonths: [],
   pedidos: [],
   reclamos: [],
@@ -482,7 +482,17 @@ const state = {
   precios: {"F4": 8134.07, "F5": 10711.82, "F6": 13285.58, "F4 G.CLARO": 12760.16, "F4 OPACID": 40468.01, "F6 OPACID 3210X2400": 13285.58, "F5 GRIS": 13285.58, "L3+3": 23562.4, "L3+3 ESM": 40468.01, "L3+3 G.C.": 29626.21, "L3+3 VC": 29626.21, "L3+3 low-e": 61300.36, "L4+4": 29436.78, "L4+4 ESM": 44781.09, "L4+4 VC": 29436.78, "L4+4BSL": 62046.18, "L4+4 BSG": 62046.18, "L4+4 BSN": 62046.18, "L4+4 BSA": 66647.43, "L4+4 BSV": 62046.18, "L4+4 BSB": 66647.43, "L4+4 GRIS": 42499.23, "L4+4  GRIS": 42499.23, "L4+4 ST 150 GRIS": 42499.23, "L4+4 ST 150 GRIS OSC.": 42499.23, "L4+4 STOP BE": 44781.09, "L4+4 LOW-E": 74393.92, "L5+5": 35388.73, "L5+5 ESM": 53560.41, "L 5+5 ABA": 35388.73, "L6+6": 39439.37, "L6+6  2250X3300": 39439.37, "L3+5 ACU": 41327.84, "L4+3 PAC": 29436.78, "L4+6 BSG": 62046.18},
   chatHistory: [],
   charts: {},
-  selectedTiposAnalisis: null, // null = usa todos los de TIPOS_ANALISIS
+  selectedTiposAnalisis: null,
+  config: {
+    // Usuarios dinámicos (null = usar USERS hardcodeados como fallback)
+    usuarios: null,
+    // Permisos por usuario: { "Nombre": ["inicio","tipologia",...] }
+    // null = todas las tabs habilitadas
+    permisos: {},
+    // Labels personalizados por tab: { "tipologia": "Consumo", ... }
+    tabLabels: {},
+  },
+  adminSubTab: 'archivos', // sub-tab activa dentro de Admin
 };
 
 const MESES_ORDER = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
@@ -493,6 +503,94 @@ const USERS = [
   {nombre:'Diego Acevedo', cargo:'Líder',    pass:'acevedo3', rol:'user',  color:'#00e5a0', emoji:'👷'},
   {nombre:'Angel Córdoba', cargo:'Líder',    pass:'angel4',   rol:'user',  color:'#b47aff', emoji:'👷'},
 ];
+
+// Definición maestra de todas las tabs disponibles
+const ALL_TABS = [
+  {id:'inicio',    icon:'🏭', label:'Inicio'},
+  {id:'tipologia', icon:'📊', label:'Tipología'},
+  {id:'falladas',  icon:'⚠️', label:'Falladas'},
+  {id:'reproceso', icon:'🔄', label:'Reproceso'},
+  {id:'graficos',  icon:'📈', label:'Gráficos'},
+  {id:'asistente', icon:'🤖', label:'Asistente'},
+  {id:'pedidos',   icon:'📋', label:'Pedidos'},
+  {id:'reclamos',  icon:'🔍', label:'Reclamos'},
+  {id:'glosario',  icon:'📖', label:'Glosario'},
+  {id:'analisis',  icon:'📉', label:'Análisis'},
+];
+
+// Obtener lista de usuarios activos (dinámicos o hardcodeados)
+function getUsuarios() {
+  return state.config.usuarios || USERS;
+}
+
+// Obtener label de una tab (personalizado o default)
+function getTabLabel(tabId) {
+  return state.config.tabLabels?.[tabId] || ALL_TABS.find(t=>t.id===tabId)?.label || tabId;
+}
+
+// Verificar si un usuario puede ver una tab
+function usuarioPuedeVerTab(nombreUsuario, tabId) {
+  const perms = state.config.permisos?.[nombreUsuario];
+  if (!perms) return true; // sin restricción = todo visible
+  return perms.includes(tabId);
+}
+
+// Reconstruir ambos navs según permisos y labels del usuario actual
+function rebuilNavs() {
+  const u = state.user;
+  if(!u) return;
+  const tabsVisibles = ALL_TABS.filter(t => u.rol==='admin' || usuarioPuedeVerTab(u.nombre, t.id));
+
+  // Sidebar PC
+  const sidebar = document.getElementById('sidebarNav');
+  if(sidebar) {
+    const logo = sidebar.querySelector('.sidebar-logo');
+    sidebar.innerHTML = '';
+    if(logo) sidebar.appendChild(logo);
+    tabsVisibles.forEach(t => {
+      const btn = document.createElement('button');
+      btn.className = 'nav-btn' + (state.tab===t.id?' active':'');
+      btn.dataset.tab = t.id;
+      btn.onclick = () => cambiarTab(t.id);
+      btn.innerHTML = `<span>${t.icon}</span><span class="nav-label">${getTabLabel(t.id)}</span>`;
+      sidebar.appendChild(btn);
+    });
+    // Admin siempre al final para admin
+    if(u.rol==='admin') {
+      const adminBtn = document.createElement('button');
+      adminBtn.className = 'nav-btn' + (state.tab==='admin'?' active':'');
+      adminBtn.id = 'sideAdmin';
+      adminBtn.dataset.tab = 'admin';
+      adminBtn.onclick = () => cambiarTab('admin');
+      adminBtn.innerHTML = `<span>⚙️</span><span class="nav-label">Admin</span>`;
+      adminBtn.style.marginTop = 'auto';
+      sidebar.appendChild(adminBtn);
+    }
+  }
+
+  // Nav mobile
+  const navBar = document.getElementById('navBar');
+  if(navBar) {
+    navBar.innerHTML = '';
+    tabsVisibles.forEach(t => {
+      const btn = document.createElement('button');
+      btn.className = 'nav-btn' + (state.tab===t.id?' active':'');
+      btn.dataset.tab = t.id;
+      btn.onclick = () => cambiarTab(t.id);
+      btn.innerHTML = `<span>${t.icon}</span>${getTabLabel(t.id)}`;
+      navBar.appendChild(btn);
+    });
+    if(u.rol==='admin') {
+      const adminBtn = document.createElement('button');
+      adminBtn.className = 'nav-btn' + (state.tab==='admin'?' active':'');
+      adminBtn.id = 'navAdmin';
+      adminBtn.dataset.tab = 'admin';
+      adminBtn.onclick = () => cambiarTab('admin');
+      adminBtn.innerHTML = `<span>⚙️</span>Admin`;
+      navBar.appendChild(adminBtn);
+    }
+  }
+}
 
 // ===== PRELOADED DATA (extracted from uploaded Excel files) =====
 const PRELOADED_DATA = {
@@ -581,14 +679,22 @@ window.onload = () => {
   state.data = JSON.parse(JSON.stringify(PRELOADED_DATA));
   state.selectedMonths = Object.keys(state.data);
   loadFromStorage();
+  // Cargar config local ANTES de renderizar el login (usuarios pueden ser dinámicos)
+  try {
+    const local = localStorage.getItem('sv_config');
+    if(local) {
+      const c = JSON.parse(local);
+      state.config = {...state.config, ...c};
+    }
+  } catch(e) {}
   renderLogin();
-  // Save default VASA prices to Firebase if not already set
   window.addEventListener('firebaseReady', async () => {
     try {
+      // Cargar config de Firebase en paralelo
+      cargarConfig().then(() => renderLogin());
       const snap = await window.fbGetDoc(window.fbDoc(window.fbDb,'config','app'));
       if(!snap.exists() || !snap.data().precios || Object.keys(snap.data().precios).length === 0) {
         await saveToFirebase();
-        console.log('Precios VASA guardados en Firebase');
       }
     } catch(e){}
   }, {once:true});
@@ -680,7 +786,7 @@ async function saveToFirebase() {
 // ===== LOGIN =====
 function renderLogin() {
   const g = document.getElementById('userGrid');
-  g.innerHTML = USERS.map((u,i) => `
+  g.innerHTML = getUsuarios().map((u,i) => `
     <button class="user-btn" id="ub${i}" onclick="selUser(${i})">
       <div class="user-avatar" style="background:${u.color}22;color:${u.color}">${u.emoji}</div>
       <div class="user-name">${u.nombre}</div>
@@ -695,7 +801,8 @@ function selUser(i) {
 }
 function doLogin() {
   if(selIdx === null){toast('Seleccioná un usuario');return;}
-  const u = USERS[selIdx];
+  const u = getUsuarios()[selIdx];
+  if(!u) return;
   const pass = document.getElementById('loginPass').value;
   if(pass !== getPass(u.nombre)){document.getElementById('loginErr').style.display='block';return;}
   document.getElementById('loginErr').style.display='none';
@@ -716,7 +823,10 @@ function doLogin() {
     document.getElementById('btnSubir').style.display='flex';
   }
   loadTheme();
-  cambiarTab('inicio');
+  cargarConfig().then(() => {
+    rebuilNavs();
+    cambiarTab('inicio');
+  });
 }
 
 // ===== NAV =====
@@ -1666,40 +1776,383 @@ function formatPesos(n) {
 
 // ===== ADMIN =====
 function renderAdmin() {
+  const sub = state.adminSubTab || 'archivos';
+  const tabs = [
+    {id:'archivos', icon:'📂', label:'Archivos'},
+    {id:'usuarios', icon:'👥', label:'Usuarios'},
+    {id:'permisos', icon:'🔒', label:'Permisos'},
+    {id:'etiquetas',icon:'🏷️', label:'Etiquetas'},
+    {id:'precios',  icon:'💲', label:'Precios'},
+  ];
+  return `
+    <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap">
+      ${tabs.map(t=>`
+        <button onclick="state.adminSubTab='${t.id}';renderTab()" style="
+          padding:8px 16px;border-radius:20px;border:1px solid var(--border);
+          background:${sub===t.id?'var(--accent-dim)':'var(--bg2)'};
+          color:${sub===t.id?'var(--accent)':'var(--text2)'};
+          border-color:${sub===t.id?'var(--accent)':'var(--border)'};
+          font-size:13px;font-weight:600;cursor:pointer;font-family:var(--font)
+        ">${t.icon} ${t.label}</button>
+      `).join('')}
+    </div>
+    ${sub==='archivos'  ? renderAdminArchivos()  : ''}
+    ${sub==='usuarios'  ? renderAdminUsuarios()  : ''}
+    ${sub==='permisos'  ? renderAdminPermisos()  : ''}
+    ${sub==='etiquetas' ? renderAdminEtiquetas() : ''}
+    ${sub==='precios'   ? renderAdminPrecios()   : ''}
+  `;
+}
+
+// ── ARCHIVOS ─────────────────────────────────────────────────────────────────
+function renderAdminArchivos() {
   const meses = Object.keys(state.data).sort((a,b)=>MESES_ORDER.indexOf(a)-MESES_ORDER.indexOf(b));
   return `
-    <div class="section-title">Archivos cargados</div>
-    ${meses.map(m=>`
-      <div class="file-item">
-        <div style="font-size:20px">📊</div>
-        <div class="file-item-name">Stock Vidrios — ${m}</div>
-        <div class="file-item-status" style="color:var(--success)">✓ Activo</div>
-        <button class="file-item-remove" onclick="eliminarMes('${m}')">✕</button>
-      </div>`).join('')}
-    <button class="btn btn-ghost" style="width:100%;margin-top:12px" onclick="mostrarSubirArchivo()">📂 Cargar nuevo archivo</button>
-    <div style="height:1px;background:var(--border);margin:20px 0"></div>
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <div class="section-title" style="margin:0">Precios por Tipología</div>
-      <button class="btn btn-ghost btn-sm" onclick="guardarPrecios()">💾 Guardar</button>
-    </div>
-    <div style="font-size:12px;color:var(--text2);margin-bottom:12px">Precio por m² en $ (pesos). Cada plancha = 9 m². El costo se calcula: planchas × 9 m² × precio/m².</div>
-    <div id="preciosTable">${renderPreciosTable()}</div>
-    <div style="height:1px;background:var(--border);margin:20px 0"></div>
-    <div class="section-title">Usuarios del sistema</div>
-    ${USERS.map(u=>{
-      const custom = (() => { try { return JSON.parse(localStorage.getItem('sv_passes')||'{}'); } catch(e){return{};} })();
-      const hasCustom = !!custom[u.nombre];
-      return `
-      <div style="display:flex;align-items:center;gap:10px;padding:10px;background:var(--bg3);border-radius:var(--radius-sm);margin-bottom:8px">
-        <div class="user-avatar" style="width:36px;height:36px;font-size:14px;background:${u.color}22;color:${u.color}">${u.emoji}</div>
-        <div style="flex:1">
-          <div style="font-weight:600">${u.nombre}</div>
-          <div style="font-size:12px;color:var(--text2)">${u.cargo} · ${hasCustom?'<span style=color:var(--accent)>contraseña personalizada</span>':'contraseña original'}</div>
-        </div>
-        <button class="btn btn-ghost btn-sm" onclick="abrirAdminPass('${u.nombre}')">🔑</button>
-      </div>`;
-    }).join('')}`;
+    <div class="card" style="margin-bottom:12px">
+      <div class="section-title">Archivos Excel cargados</div>
+      ${meses.map(m=>{
+        const tieneDiario = !!(state.data[m]?.movimientos_dia && Object.keys(state.data[m].movimientos_dia).length>0);
+        return `
+        <div class="file-item">
+          <div style="font-size:20px">📊</div>
+          <div class="file-item-name">
+            Stock Vidrios — ${m}
+            <span style="font-size:10px;color:${tieneDiario?'var(--success)':'var(--text3)'};margin-left:8px">
+              ${tieneDiario?'● Datos diarios':'○ Solo totales'}
+            </span>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="eliminarMes('${m}')">✕</button>
+        </div>`;
+      }).join('')}
+      <button class="btn btn-ghost" style="width:100%;margin-top:12px" onclick="mostrarSubirArchivo()">📂 Cargar nuevo Excel</button>
+    </div>`;
 }
+
+// ── USUARIOS ─────────────────────────────────────────────────────────────────
+function renderAdminUsuarios() {
+  const usuarios = getUsuarios();
+  const EMOJIS = ['👷','💼','👨‍💼','👩‍💼','🧑‍🔧','👨‍🔬','🏗️','📋','🔧','⚙️'];
+  const COLORES = ['#00e5ff','#f5e642','#00e5a0','#b47aff','#ff4d6a','#ffb347','#4db8ff','#ff6eb4','#7fff00','#ffa07a'];
+  return `
+    <div class="card" style="margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <div class="section-title" style="margin:0">Usuarios del sistema</div>
+        <button class="btn btn-accent btn-sm" onclick="abrirModalNuevoUsuario()">＋ Nuevo usuario</button>
+      </div>
+      ${usuarios.map((u,i)=>`
+        <div style="display:flex;align-items:center;gap:12px;padding:12px;background:var(--bg3);border-radius:var(--radius-sm);margin-bottom:8px;border:1px solid var(--border)">
+          <div class="user-avatar" style="width:40px;height:40px;font-size:18px;background:${u.color}22;color:${u.color};flex-shrink:0">${u.emoji}</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:700;font-size:14px">${u.nombre}</div>
+            <div style="font-size:12px;color:var(--text2)">${u.cargo} · <span style="color:${u.rol==='admin'?'var(--accent)':'var(--text3)'}">${u.rol==='admin'?'Admin':'Usuario'}</span></div>
+          </div>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-ghost btn-sm" onclick="abrirModalEditarUsuario(${i})" title="Editar">✏️</button>
+            <button class="btn btn-ghost btn-sm" onclick="abrirAdminPass('${u.nombre}')" title="Cambiar contraseña">🔑</button>
+            ${u.nombre !== state.user.nombre ? `<button class="btn btn-danger btn-sm" onclick="eliminarUsuario(${i})" title="Eliminar">✕</button>` : ''}
+          </div>
+        </div>
+      `).join('')}
+    </div>
+
+    <!-- Modal nuevo/editar usuario -->
+    <div class="overlay" id="modalUsuario" style="display:none" onclick="if(event.target===this)cerrarModalUsuario()">
+    <div class="modal" style="position:relative;max-width:400px">
+      <button class="close-btn" onclick="cerrarModalUsuario()">✕</button>
+      <div class="modal-title" id="modalUsuarioTitle">Nuevo Usuario</div>
+      <input type="hidden" id="editUserIdx" value="-1">
+      <div class="field"><label>Nombre completo</label><input id="uNombre" placeholder="Ej: Juan Pérez"></div>
+      <div class="field"><label>Cargo</label><input id="uCargo" placeholder="Ej: Operario"></div>
+      <div class="field"><label>Contraseña inicial</label><input id="uPass" type="password" placeholder="Mínimo 4 caracteres"></div>
+      <div class="field">
+        <label>Rol</label>
+        <select id="uRol">
+          <option value="user">Usuario (solo lectura)</option>
+          <option value="admin">Admin (acceso total)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Emoji</label>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px" id="emojiPicker">
+          ${['👷','💼','👨‍💼','👩‍💼','🧑‍🔧','👨‍🔬','🏗️','📋','🔧','⚙️','🧑','👤'].map(e=>`
+            <div onclick="selectEmoji('${e}')" id="emoji_${e}" style="font-size:24px;cursor:pointer;padding:4px;border-radius:8px;border:2px solid transparent;transition:all .15s" data-emoji="${e}">${e}</div>
+          `).join('')}
+        </div>
+        <input type="hidden" id="uEmoji" value="👷">
+      </div>
+      <div class="field">
+        <label>Color</label>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px">
+          ${['#00e5ff','#f5e642','#00e5a0','#b47aff','#ff4d6a','#ffb347','#4db8ff','#ff6eb4'].map(c=>`
+            <div onclick="selectColor('${c}')" id="color_${c.replace('#','')}" style="width:28px;height:28px;border-radius:50%;background:${c};cursor:pointer;border:3px solid transparent;transition:all .15s"></div>
+          `).join('')}
+        </div>
+        <input type="hidden" id="uColor" value="#00e5ff">
+      </div>
+      <button class="btn btn-accent" style="width:100%;margin-top:8px" onclick="guardarUsuario()">Guardar</button>
+    </div></div>`;
+}
+
+function abrirModalNuevoUsuario() {
+  document.getElementById('modalUsuarioTitle').textContent = 'Nuevo Usuario';
+  document.getElementById('editUserIdx').value = '-1';
+  document.getElementById('uNombre').value = '';
+  document.getElementById('uCargo').value = '';
+  document.getElementById('uPass').value = '';
+  document.getElementById('uRol').value = 'user';
+  selectEmoji('👷');
+  selectColor('#00e5ff');
+  document.getElementById('modalUsuario').style.display = 'flex';
+}
+
+function abrirModalEditarUsuario(idx) {
+  const u = getUsuarios()[idx];
+  if(!u) return;
+  document.getElementById('modalUsuarioTitle').textContent = 'Editar Usuario';
+  document.getElementById('editUserIdx').value = idx;
+  document.getElementById('uNombre').value = u.nombre;
+  document.getElementById('uCargo').value = u.cargo;
+  document.getElementById('uPass').value = '';
+  document.getElementById('uRol').value = u.rol;
+  selectEmoji(u.emoji);
+  selectColor(u.color);
+  document.getElementById('modalUsuario').style.display = 'flex';
+}
+
+function cerrarModalUsuario() {
+  document.getElementById('modalUsuario').style.display = 'none';
+}
+
+function selectEmoji(e) {
+  document.querySelectorAll('#emojiPicker [data-emoji]').forEach(el => {
+    el.style.borderColor = el.dataset.emoji===e ? 'var(--accent)' : 'transparent';
+    el.style.background  = el.dataset.emoji===e ? 'var(--accent-dim)' : 'transparent';
+  });
+  document.getElementById('uEmoji').value = e;
+}
+
+function selectColor(c) {
+  document.querySelectorAll('[id^="color_"]').forEach(el => {
+    const elColor = '#'+el.id.replace('color_','');
+    el.style.borderColor = elColor===c ? 'var(--text)' : 'transparent';
+  });
+  document.getElementById('uColor').value = c;
+}
+
+function guardarUsuario() {
+  const nombre = document.getElementById('uNombre').value.trim();
+  const cargo  = document.getElementById('uCargo').value.trim();
+  const pass   = document.getElementById('uPass').value.trim();
+  const rol    = document.getElementById('uRol').value;
+  const emoji  = document.getElementById('uEmoji').value;
+  const color  = document.getElementById('uColor').value;
+  const idx    = parseInt(document.getElementById('editUserIdx').value);
+
+  if(!nombre || !cargo) { toast('Nombre y cargo son obligatorios'); return; }
+
+  const usuarios = getUsuarios().map(u=>({...u})); // clonar
+  if(idx >= 0) {
+    // Editar existente
+    usuarios[idx] = {...usuarios[idx], nombre, cargo, rol, emoji, color};
+    if(pass.length >= 4) usuarios[idx].pass = pass;
+  } else {
+    // Nuevo
+    if(!pass || pass.length < 4) { toast('La contraseña debe tener al menos 4 caracteres'); return; }
+    if(usuarios.find(u=>u.nombre===nombre)) { toast('Ya existe un usuario con ese nombre'); return; }
+    usuarios.push({nombre, cargo, pass, rol, emoji, color});
+  }
+
+  state.config.usuarios = usuarios;
+  guardarConfig();
+  cerrarModalUsuario();
+  renderTab();
+  rebuilNavs();
+  toast('Usuario guardado ✓');
+}
+
+function eliminarUsuario(idx) {
+  const usuarios = getUsuarios();
+  const u = usuarios[idx];
+  if(!u) return;
+  if(!confirm(`¿Eliminar a ${u.nombre}?`)) return;
+  const nuevos = usuarios.filter((_,i)=>i!==idx);
+  state.config.usuarios = nuevos;
+  guardarConfig();
+  renderTab();
+  toast(`${u.nombre} eliminado`);
+}
+
+// ── PERMISOS ─────────────────────────────────────────────────────────────────
+function renderAdminPermisos() {
+  const usuarios = getUsuarios().filter(u=>u.rol!=='admin');
+  return `
+    <div class="card" style="margin-bottom:12px">
+      <div class="section-title" style="margin-bottom:4px">Control de acceso por usuario</div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:16px">Los admins siempre tienen acceso a todo. Marcá las solapas que puede ver cada usuario.</div>
+      <div style="overflow-x:auto">
+        <table class="data-table" style="min-width:500px">
+          <thead><tr>
+            <th>Usuario</th>
+            ${ALL_TABS.map(t=>`<th style="text-align:center;font-size:10px">${t.icon}<br>${getTabLabel(t.id)}</th>`).join('')}
+          </tr></thead>
+          <tbody>
+            ${usuarios.map(u=>{
+              const perms = state.config.permisos?.[u.nombre] || ALL_TABS.map(t=>t.id);
+              return `<tr>
+                <td>
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <span style="font-size:16px">${u.emoji}</span>
+                    <div>
+                      <div style="font-weight:600;font-size:13px">${u.nombre}</div>
+                      <div style="font-size:11px;color:var(--text3)">${u.cargo}</div>
+                    </div>
+                  </div>
+                </td>
+                ${ALL_TABS.map(t=>`
+                  <td style="text-align:center">
+                    <input type="checkbox" 
+                      id="perm_${u.nombre}_${t.id}" 
+                      ${perms.includes(t.id)?'checked':''}
+                      onchange="togglePermiso('${u.nombre}','${t.id}',this.checked)"
+                      style="width:16px;height:16px;accent-color:var(--accent);cursor:pointer">
+                  </td>
+                `).join('')}
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:16px">
+        <button class="btn btn-ghost btn-sm" onclick="aplicarTodosPermisos(true)">✅ Habilitar todo</button>
+        <button class="btn btn-ghost btn-sm" onclick="aplicarTodosPermisos(false)">🚫 Deshabilitar todo</button>
+        <button class="btn btn-accent btn-sm" style="margin-left:auto" onclick="guardarConfig();toast('Permisos guardados ✓')">💾 Guardar permisos</button>
+      </div>
+    </div>`;
+}
+
+function togglePermiso(nombre, tabId, checked) {
+  if(!state.config.permisos) state.config.permisos = {};
+  if(!state.config.permisos[nombre]) {
+    state.config.permisos[nombre] = ALL_TABS.map(t=>t.id);
+  }
+  if(checked) {
+    if(!state.config.permisos[nombre].includes(tabId))
+      state.config.permisos[nombre].push(tabId);
+  } else {
+    state.config.permisos[nombre] = state.config.permisos[nombre].filter(t=>t!==tabId);
+  }
+}
+
+function aplicarTodosPermisos(habilitar) {
+  const usuarios = getUsuarios().filter(u=>u.rol!=='admin');
+  if(!state.config.permisos) state.config.permisos = {};
+  usuarios.forEach(u=>{
+    state.config.permisos[u.nombre] = habilitar ? ALL_TABS.map(t=>t.id) : [];
+    ALL_TABS.forEach(t=>{
+      const cb = document.getElementById(`perm_${u.nombre}_${t.id}`);
+      if(cb) cb.checked = habilitar;
+    });
+  });
+}
+
+// ── ETIQUETAS ─────────────────────────────────────────────────────────────────
+function renderAdminEtiquetas() {
+  return `
+    <div class="card" style="margin-bottom:12px">
+      <div class="section-title" style="margin-bottom:4px">Nombres de solapas</div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:16px">Personalizá cómo se llama cada solapa en el menú. Dejá vacío para usar el nombre por defecto.</div>
+      ${ALL_TABS.map(t=>`
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+          <div style="font-size:22px;width:32px;text-align:center;flex-shrink:0">${t.icon}</div>
+          <div style="flex:1">
+            <div style="font-size:11px;color:var(--text3);margin-bottom:4px">Default: <strong>${t.label}</strong></div>
+            <input 
+              id="label_${t.id}"
+              value="${state.config.tabLabels?.[t.id]||''}" 
+              placeholder="${t.label}"
+              style="width:100%;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;color:var(--text);outline:none;font-size:14px;font-family:var(--font)"
+              oninput="previewLabel('${t.id}',this.value)"
+            >
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="resetLabel('${t.id}')">↩</button>
+        </div>
+      `).join('')}
+      <button class="btn btn-accent" style="width:100%;margin-top:8px" onclick="guardarEtiquetas()">💾 Guardar etiquetas</button>
+    </div>`;
+}
+
+function previewLabel(tabId, valor) {
+  if(!state.config.tabLabels) state.config.tabLabels = {};
+  state.config.tabLabels[tabId] = valor.trim() || null;
+}
+
+function resetLabel(tabId) {
+  if(state.config.tabLabels) delete state.config.tabLabels[tabId];
+  const input = document.getElementById('label_'+tabId);
+  if(input) input.value = '';
+  rebuilNavs();
+}
+
+function guardarEtiquetas() {
+  if(!state.config.tabLabels) state.config.tabLabels = {};
+  ALL_TABS.forEach(t=>{
+    const v = document.getElementById('label_'+t.id)?.value.trim();
+    if(v) state.config.tabLabels[t.id] = v;
+    else  delete state.config.tabLabels[t.id];
+  });
+  guardarConfig();
+  rebuilNavs();
+  toast('Etiquetas guardadas ✓');
+}
+
+// ── PRECIOS ───────────────────────────────────────────────────────────────────
+function renderAdminPrecios() {
+  return `
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div class="section-title" style="margin:0">Precios por Tipología</div>
+        <button class="btn btn-accent btn-sm" onclick="guardarPrecios()">💾 Guardar</button>
+      </div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:12px">Precio por m² en $ (pesos). Cada plancha = 9 m².</div>
+      <div id="preciosTable">${renderPreciosTable()}</div>
+    </div>`;
+}
+
+// ── GUARDAR CONFIG EN FIREBASE ────────────────────────────────────────────────
+async function guardarConfig() {
+  localStorage.setItem('sv_config', JSON.stringify(state.config));
+  if(!window.fbDb) return;
+  try {
+    await window.fbSetDoc(window.fbDoc(window.fbDb,'config','adminConfig'), {
+      usuarios:   state.config.usuarios  || null,
+      permisos:   state.config.permisos  || {},
+      tabLabels:  state.config.tabLabels || {},
+      updatedAt:  new Date().toISOString()
+    });
+  } catch(e) { console.warn('Error guardando config:', e); }
+}
+
+async function cargarConfig() {
+  // Primero localStorage
+  try {
+    const local = localStorage.getItem('sv_config');
+    if(local) {
+      const c = JSON.parse(local);
+      state.config = {...state.config, ...c};
+    }
+  } catch(e) {}
+  // Luego Firebase (override)
+  if(!window.fbDb) return;
+  try {
+    const snap = await window.fbGetDoc(window.fbDoc(window.fbDb,'config','adminConfig'));
+    if(snap.exists()) {
+      const d = snap.data();
+      if(d.usuarios)  state.config.usuarios  = d.usuarios;
+      if(d.permisos)  state.config.permisos  = d.permisos;
+      if(d.tabLabels) state.config.tabLabels = d.tabLabels;
+      localStorage.setItem('sv_config', JSON.stringify(state.config));
+    }
+  } catch(e) { console.warn('Error cargando config:', e); }
 
 function eliminarMes(mes) {
   if(state.user?.rol !== 'admin') { toast('Sin permisos'); return; }
@@ -1925,8 +2378,14 @@ function mostrarNotif() {
 function getPass(nombre) {
   try {
     const custom = JSON.parse(localStorage.getItem('sv_passes')||'{}');
-    return custom[nombre] || USERS.find(u=>u.nombre===nombre)?.pass;
-  } catch(e) { return USERS.find(u=>u.nombre===nombre)?.pass; }
+    if(custom[nombre]) return custom[nombre];
+    // Buscar en usuarios dinámicos primero, luego en USERS hardcodeados
+    return getUsuarios().find(u=>u.nombre===nombre)?.pass
+        || USERS.find(u=>u.nombre===nombre)?.pass;
+  } catch(e) {
+    return getUsuarios().find(u=>u.nombre===nombre)?.pass
+        || USERS.find(u=>u.nombre===nombre)?.pass;
+  }
 }
 function setPass(nombre, newPass) {
   try {
