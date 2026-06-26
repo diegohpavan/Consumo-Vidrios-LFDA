@@ -638,8 +638,7 @@ function injectPreloadedStock() {
   Object.entries(PRELOADED_DATA).forEach(([mes, pd]) => {
     if (!state.data[mes]) return;
     // Solo inyectar stock_inicio/final si el Excel no trajo solapas diarias
-    const tieneDiario = (state.data[mes].movimientos_dia && Object.keys(state.data[mes].movimientos_dia).length > 0) ||
-                        (state.data[mes].stock_por_dia  && Object.keys(state.data[mes].stock_por_dia).length  > 0);
+    const tieneDiario = (state.data[mes].stock_por_dia && Object.keys(state.data[mes].stock_por_dia).length > 0);
     if (!tieneDiario) {
       if (pd.stock_inicio && Object.keys(pd.stock_inicio).length > 0)
         state.data[mes].stock_inicio = pd.stock_inicio;
@@ -1815,7 +1814,7 @@ function renderAdminArchivos() {
     <div class="card" style="margin-bottom:12px">
       <div class="section-title">Archivos Excel cargados</div>
       ${meses.map(m=>{
-        const tieneDiario = !!(state.data[m]?.movimientos_dia && Object.keys(state.data[m].movimientos_dia).length>0);
+        const tieneDiario = !!(state.data[m]?.stock_por_dia && Object.keys(state.data[m].stock_por_dia).length>0);
         return `
         <div class="file-item">
           <div style="font-size:20px">📊</div>
@@ -2241,7 +2240,7 @@ async function processExcelFile(file) {
         const wsDia = wb.Sheets[sheetName];
         const rowsDia = XLSX.utils.sheet_to_json(wsDia, {header:1, defval:null, raw:true});
 
-        rowsDia.slice(FILA_DATOS).forEach(row => {
+        rowsDia.slice(FILA_DATOS).forEach((row, rowIdx) => {
           if(!row || !row[COL_TIPO]) return;
           const tipo = String(row[COL_TIPO]).trim();
           if(!tipo || tipo.length < 2) return;
@@ -2249,7 +2248,20 @@ async function processExcelFile(file) {
           if(up==='TIP'||up==='DE'||up==='VIDRIOS'||up==='TOTAL'||up==='TIPOLOGÍA') return;
           if(/^[\d\s\/\-]+$/.test(tipo)) return;
 
-          const stockB  = (typeof row[COL_STOCK_B] === 'number') ? row[COL_STOCK_B] : null;
+          // Leer col B (stock inicio del día) directamente de la celda calculada.
+          // XLSX.js guarda el valor calculado en cell.v incluso si la celda tiene
+          // fórmula (cell.f) — el archivo viene con cache de fórmulas de Excel/LibreOffice.
+          const rowNum = FILA_DATOS + rowIdx + 1; // fila real en la hoja (1-indexed)
+          const cellAddr = 'B' + rowNum;
+          const cellObj = wsDia[cellAddr];
+          let stockB = null;
+          if(cellObj) {
+            if(typeof cellObj.v === 'number') stockB = cellObj.v;
+            else if(typeof cellObj.v === 'string' && !isNaN(parseFloat(cellObj.v))) stockB = parseFloat(cellObj.v);
+          }
+          // Fallback: si sheet_to_json ya trajo un número (día 1, sin fórmula)
+          if(stockB === null && typeof row[COL_STOCK_B] === 'number') stockB = row[COL_STOCK_B];
+
           // Sumar consumo cols C-J (índices 2-9) + roturas K(10) + falla L(11) directamente
           let consumo = 0;
           for(let c=COL_CONS_INI; c<=COL_CONS_FIN; c++) {
@@ -2265,45 +2277,21 @@ async function processExcelFile(file) {
           if(falla   > 0) data.descuentos_proveedor[tipo] = (data.descuentos_proveedor[tipo]||0) + falla;
           if(ingreso > 0) data.ingresos[tipo] = (data.ingresos[tipo]||0) + ingreso;
 
-          // Stock inicio del primer día del mes = col B del día 1 (único numérico)
+          // Stock inicio del primer día del mes
           if(diaNum === primerDia && stockB !== null) {
             data.stock_inicio[tipo] = stockB;
           }
 
-          // Para stock_por_dia: solo guardamos col B del día 1 (real).
-          // Los demás se calculan acumulativamente en calcStockCeroMesConStock.
-          if(diaNum === primerDia && stockB !== null) {
+          // GUARDAR EL VALOR REAL DE COL B PARA CADA DÍA — esta es la fuente de verdad.
+          // No reconstruimos matemáticamente: el Excel ya calculó el stock correcto
+          // (incluye fines de semana, ajustes manuales, redondeos, etc.)
+          if(stockB !== null) {
             if(!data.stock_por_dia[tipo]) data.stock_por_dia[tipo] = {};
             data.stock_por_dia[tipo][diaNum] = stockB;
           }
-
-          // Guardamos movimientos diarios para reconstruir stock día a día
-          if(!data.movimientos_dia) data.movimientos_dia = {};
-          if(!data.movimientos_dia[tipo]) data.movimientos_dia[tipo] = {};
-          data.movimientos_dia[tipo][diaNum] = {
-            consumo: consumo + roturas + falla, // total salidas del día
-            ingreso
-          };
         });
       } catch(eDia) { console.warn('Error leyendo solapa', sheetName, eDia); }
     });
-
-    // Reconstruir stock día a día desde stock_inicio + movimientos diarios
-    if(data.movimientos_dia) {
-      Object.keys(data.movimientos_dia).forEach(tipo => {
-        const stockIni = data.stock_inicio[tipo];
-        if(stockIni === undefined && stockIni !== 0) return;
-        let stock = stockIni;
-        const diasOrdenados = Object.keys(data.movimientos_dia[tipo]).map(Number).sort((a,b)=>a-b);
-        if(!data.stock_por_dia[tipo]) data.stock_por_dia[tipo] = {};
-        diasOrdenados.forEach(dia => {
-          // stock al INICIO del día = stock antes de los movimientos de ese día
-          data.stock_por_dia[tipo][dia] = stock;
-          const mov = data.movimientos_dia[tipo][dia];
-          stock = stock + (mov.ingreso||0) - (mov.consumo||0);
-        });
-      });
-    }
 
     // Si no hay solapas numéricas, intentar RESUMEN APP como fallback
     if(solapasNumericas.length === 0) {
@@ -3223,60 +3211,9 @@ function calcStockCeroMesConStock(mes, tipo, stockInicioOverride) {
                     : null;
 
   // ── MODO EXACTO: tenemos movimientos_dia (solapas diarias del Excel) ────────
-  const movDia = d.movimientos_dia?.[tipo] ||
-    d.movimientos_dia?.[tipo?.replace('L4+4BSL','L4+4 BSL')] ||
-    d.movimientos_dia?.[tipo?.replace('L4+4 BSL','L4+4BSL')] || null;
-
-  if (movDia && stockInicio !== null) {
-    const mesNum = MESES_NUMERO[mes];
-    const año    = AÑO_ANALISIS;
-    let stock = stockInicio;
-    let diasParada = 0;
-    const diasDetalle = [];
-
-    // Fecha de hoy — no analizar días futuros
-    const hoy = new Date();
-    const hoyDia   = hoy.getFullYear() === año && hoy.getMonth() === mesNum ? hoy.getDate() : 999;
-
-    Object.keys(movDia).map(Number).sort((a,b)=>a-b).forEach(dia => {
-      // No analizar días que aún no ocurrieron
-      if (dia > hoyDia) {
-        // Igual actualizar stock con lo que se sabe (no sumar futuros)
-        return;
-      }
-
-      const m = movDia[dia];
-
-      // ¿Es día hábil?
-      const dow = new Date(año, mesNum, dia).getDay();
-      if(dow === 0 || dow === 6) { // fin de semana
-        stock = stock + (m.ingreso||0) - (m.consumo||0);
-        return;
-      }
-      const key = String(mesNum+1).padStart(2,'0')+'-'+String(dia).padStart(2,'0');
-      if(FERIADOS_2026.has(key)) { // feriado
-        stock = stock + (m.ingreso||0) - (m.consumo||0);
-        return;
-      }
-
-      // Día hábil: ¿había stock AL INICIO del día?
-      // Si ese día llegaron ingresos, primero se suman (llegaron a planta ese día)
-      // y LUEGO se evalúa si había stock para producir.
-      // Criterio: si stock_con_ingreso > 0 → no es parada (el vidrio llegó y se pudo producir)
-      const stockConIngreso = stock + (m.ingreso||0);
-      if(stockConIngreso <= 0) {
-        diasParada++;
-        diasDetalle.push(dia);
-      }
-      stock = stockConIngreso - (m.consumo||0);
-    });
-
-    return {consumo:cons, consNeto, ingresos:ing, stockInicio,
-            stockFinal:stock, dias:diasParada, diasDetalle, dh,
-            tieneStockReal:true, tieneDiario:true};
-  }
-
-  // ── MODO EXACTO legacy: stock_por_dia precalculado ───────────────────────
+  // ── MODO EXACTO: stock_por_dia con valores REALES de col B del Excel ────────
+  // Esta es la fuente de verdad — no reconstruimos nada matemáticamente,
+  // usamos exactamente lo que Excel calculó (incluye ajustes, redondeos, etc.)
   const stockDias = d.stock_por_dia ? (
     d.stock_por_dia[tipo] ||
     d.stock_por_dia[tipo?.replace('L4+4BSL','L4+4 BSL')] ||
@@ -3286,19 +3223,17 @@ function calcStockCeroMesConStock(mes, tipo, stockInicioOverride) {
   if (stockDias && Object.keys(stockDias).length > 0) {
     const mesNum  = MESES_NUMERO[mes];
     const año     = AÑO_ANALISIS;
-    const hoy     = new Date();
-    const hoyDia  = hoy.getFullYear()===año && hoy.getMonth()===mesNum ? hoy.getDate() : 999;
     let diasParada = 0;
     const diasDetalle = [];
 
     Object.entries(stockDias).forEach(([diaStr, stockVal]) => {
       const dia = parseInt(diaStr, 10);
-      if(dia > hoyDia) return; // día futuro — ignorar
       const fecha = new Date(año, mesNum, dia);
-      const dow   = fecha.getDay();
-      if (dow === 0 || dow === 6) return;
+      const dow   = fecha.getDay(); // 0=dom, 6=sab
+      if (dow === 0 || dow === 6) return; // fin de semana — no se produce, no cuenta
       const key   = String(mesNum+1).padStart(2,'0') + '-' + String(dia).padStart(2,'0');
-      if (FERIADOS_2026.has(key)) return;
+      if (FERIADOS_2026.has(key)) return; // feriado — no se produce, no cuenta
+      // Stock al inicio del día (col B real del Excel) ≤ 0 → parada
       if (stockVal <= 0) {
         diasParada++;
         diasDetalle.push(dia);
