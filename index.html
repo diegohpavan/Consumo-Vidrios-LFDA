@@ -891,6 +891,7 @@ function renderMonthFilter(containerId) {
   return `
     <div class="month-filter">
       <div class="month-chip all ${state.selectedMonths.length===allMeses.length?'active':''}" onclick="toggleAllMonths()">Todos</div>
+      <div class="month-chip all ${state.selectedMonths.length===0?'active':''}" onclick="selectNingunMes()" style="opacity:.7">Ninguno</div>
       ${allMeses.map(m=>`<div class="month-chip ${state.selectedMonths.includes(m)?'active':''}" onclick="toggleMonth('${m}')">${m}</div>`).join('')}
     </div>`;
 }
@@ -907,6 +908,11 @@ function toggleMonth(m) {
   renderTab();
 }
 
+function selectNingunMes() {
+  state.selectedMonths = [];
+  destroyCharts();
+  renderTab();
+}
 function toggleAllMonths() {
   const all = Object.keys(state.data).sort((a,b)=>MESES_ORDER.indexOf(a)-MESES_ORDER.indexOf(b));
   state.selectedMonths = [...all];
@@ -3212,8 +3218,6 @@ function calcStockCeroMesConStock(mes, tipo, stockInicioOverride) {
 
   // ── MODO EXACTO: tenemos movimientos_dia (solapas diarias del Excel) ────────
   // ── MODO EXACTO: stock_por_dia con valores REALES de col B del Excel ────────
-  // Esta es la fuente de verdad — no reconstruimos nada matemáticamente,
-  // usamos exactamente lo que Excel calculó (incluye ajustes, redondeos, etc.)
   const stockDias = d.stock_por_dia ? (
     d.stock_por_dia[tipo] ||
     d.stock_por_dia[tipo?.replace('L4+4BSL','L4+4 BSL')] ||
@@ -3225,20 +3229,44 @@ function calcStockCeroMesConStock(mes, tipo, stockInicioOverride) {
     const año     = AÑO_ANALISIS;
     let diasParada = 0;
     const diasDetalle = [];
-
-    Object.entries(stockDias).forEach(([diaStr, stockVal]) => {
+    const diasHabilesMes = Object.entries(stockDias).filter(([diaStr]) => {
       const dia = parseInt(diaStr, 10);
-      const fecha = new Date(año, mesNum, dia);
-      const dow   = fecha.getDay(); // 0=dom, 6=sab
-      if (dow === 0 || dow === 6) return; // fin de semana — no se produce, no cuenta
-      const key   = String(mesNum+1).padStart(2,'0') + '-' + String(dia).padStart(2,'0');
-      if (FERIADOS_2026.has(key)) return; // feriado — no se produce, no cuenta
-      // Stock al inicio del día (col B real del Excel) ≤ 0 → parada
-      if (stockVal <= 0) {
-        diasParada++;
-        diasDetalle.push(dia);
-      }
+      const dow = new Date(año, mesNum, dia).getDay();
+      if(dow===0||dow===6) return false;
+      const key = String(mesNum+1).padStart(2,'0')+'-'+String(dia).padStart(2,'0');
+      return !FERIADOS_2026.has(key);
     });
+
+    // Detectar si col B está contaminada por herencia negativa de mes anterior:
+    // Si TODOS los días hábiles tienen stock ≤ 0 pero hay ingresos reales ese mes,
+    // el primer día del mes probablemente arrancó con el stock negativo heredado
+    // y los ingresos lo recuperaron. En ese caso usamos lógica de ESTIMADO.
+    const todosNegativos = diasHabilesMes.length > 0 && diasHabilesMes.every(([,v])=>v<=0);
+    const primerStockB = stockDias[Math.min(...Object.keys(stockDias).map(Number))];
+
+    if(todosNegativos && ing > 0 && primerStockB !== null) {
+      // Usar lógica estimada: ¿cuántos días antes de que llegaran los ingresos?
+      const stockConIng = (primerStockB||0) + ing;
+      if(stockConIng > 0 && consNeto > 0) {
+        // Stock se recuperó — calcular días sin stock proporcionalmente
+        const dh2 = diasHabilesMes.length;
+        const fracSinStock = Math.max(0, -(primerStockB||0)) / (ing||1);
+        diasParada = Math.min(dh2, Math.round(fracSinStock * dh2));
+      } else if(stockConIng <= 0) {
+        diasParada = diasHabilesMes.length; // ni con ingresos alcanzó
+      }
+      // Si stockInicio ya era 0 exacto y hay ingresos, probablemente 0 días reales
+      if((primerStockB||0) === 0 && ing > 0) diasParada = 0;
+    } else {
+      // Lectura directa de col B (caso normal — datos confiables)
+      diasHabilesMes.forEach(([diaStr, stockVal]) => {
+        const dia = parseInt(diaStr, 10);
+        if (stockVal <= 0) {
+          diasParada++;
+          diasDetalle.push(dia);
+        }
+      });
+    }
 
     const stockFinal = stockInicio !== null ? stockInicio + ing - consNeto : null;
     return {consumo:cons, consNeto, ingresos:ing, stockInicio,
