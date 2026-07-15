@@ -471,7 +471,6 @@ input:checked+.slider:before{transform:translateX(18px);background:#000}
 <div class="toast" id="toast" style="display:none"></div>
 
 <script>
-// Registrar plugin de datalabels globalmente para todas las barras
 if(typeof ChartDataLabels !== 'undefined') Chart.register(ChartDataLabels);
 
 // ===== STATE =====
@@ -491,12 +490,7 @@ const state = {
     usuarios: null,
     permisos: {},
     tabLabels: {},
-    // Configuración de análisis de compras
-    compras: {
-      semanasCobertura: 4,   // semanas de consumo a cubrir con la orden
-      semanaBuffer: 2,        // semanas de stock mínimo de seguridad
-      stockManual: {},        // { tipo: cantidad } — override manual del stock actual
-    },
+    compras: { semanasCobertura:4, semanaBuffer:2, stockManual:{} },
   },
   adminSubTab: 'archivos',
 };
@@ -3078,207 +3072,7 @@ function exportPDFReclamos() {
 }
 
 
-// ===== ANÁLISIS DE COMPRAS =====
-
-// Obtener stock actual de una tipología:
-// 1) Override manual (config.compras.stockManual)
-// 2) Última col B del Excel más reciente cargado
-function getStockActual(tipo) {
-  const manual = state.config.compras?.stockManual?.[tipo];
-  if (manual !== undefined && manual !== null && manual !== '') return Number(manual);
-
-  // Buscar el mes más reciente con stock_por_dia
-  const mesesOrden = [...getMeses()].reverse(); // más reciente primero
-  for (const mes of mesesOrden) {
-    const d = state.data[mes];
-    if (!d?.stock_por_dia) continue;
-    const diasTipo = d.stock_por_dia[tipo] ||
-      d.stock_por_dia[tipo?.replace('L4+4BSL','L4+4 BSL')] ||
-      d.stock_por_dia[tipo?.replace('L4+4 BSL','L4+4BSL')];
-    if (!diasTipo) continue;
-    // Tomar el valor del último día cargado
-    const ultimoDia = Math.max(...Object.keys(diasTipo).map(Number));
-    return diasTipo[ultimoDia];
-  }
-  return null; // sin dato
-}
-
-// Calcular consumo promedio semanal de una tipología
-function getConsumoPorSemana(tipo) {
-  const meses = getMeses();
-  let totalConsNeto = 0;
-  let totalSemanasHabiles = 0;
-
-  meses.forEach(mes => {
-    const d = state.data[mes]; if(!d) return;
-    const cons   = getValTipo(d.consumo, tipo);
-    const dcD    = getValTipo(d.descuentos_daños, tipo);
-    const dcP    = getValTipo(d.descuentos_proveedor, tipo);
-    const consNeto = Math.max(0, cons - dcD - dcP);
-    if(consNeto === 0) return; // mes sin consumo no cuenta para el promedio
-    totalConsNeto += consNeto;
-    totalSemanasHabiles += diasHabiles(mes) / 5; // días hábiles ÷ 5 = semanas
-  });
-
-  if(totalSemanasHabiles === 0) return 0;
-  return totalConsNeto / totalSemanasHabiles;
-}
-
-// Calcular la recomendación de compra para una tipología
-function calcRecomendacionCompra(tipo) {
-  const cfg = state.config.compras || {};
-  const semanasCobertura = Number(cfg.semanasCobertura) || 4;
-  const semanaBuffer     = Number(cfg.semanaBuffer)     || 2;
-  const totalSemanas     = semanasCobertura + semanaBuffer;
-
-  const consumoSemanal   = getConsumoPorSemana(tipo);
-  const consumoMensual   = consumoSemanal * (totalSemanas > 0 ? (totalSemanas / (totalSemanas/4)) : 4); // referencia mensual
-  const stockActual      = getStockActual(tipo);
-  const necesidadTotal   = Math.ceil(totalSemanas * consumoSemanal);
-  const stockOk          = stockActual !== null ? stockActual : 0;
-  const ordenCompra      = Math.max(0, necesidadTotal - stockOk);
-  const semanasConStock  = consumoSemanal > 0 && stockActual !== null
-    ? (stockActual / consumoSemanal).toFixed(1) : null;
-  const estado           = stockActual === null ? 'sin_dato'
-    : stockActual <= 0 ? 'critico'
-    : Number(semanasConStock) < semanaBuffer ? 'bajo'
-    : Number(semanasConStock) < semanasCobertura ? 'atencion'
-    : 'ok';
-
-  return {
-    tipo, consumoSemanal, stockActual, necesidadTotal,
-    ordenCompra, semanasConStock, estado,
-    semanasCobertura, semanaBuffer,
-  };
-}
-
-function renderSectionCompras() {
-  const tipos = getTiposSeleccionados();
-  const cfg   = state.config.compras || {};
-  const sc    = Number(cfg.semanasCobertura) || 4;
-  const sb    = Number(cfg.semanaBuffer)     || 2;
-  const meses = getMeses();
-
-  const resultados = tipos.map(calcRecomendacionCompra)
-    .filter(r => r.consumoSemanal > 0)
-    .sort((a,b) => {
-      const ord = {critico:0,bajo:1,atencion:2,sin_dato:3,ok:4};
-      return (ord[a.estado]??5) - (ord[b.estado]??5);
-    });
-
-  const ESTADO = {
-    critico: {label:'⛔ Sin stock',     color:'var(--danger)', bg:'#ff4d6a12'},
-    bajo:    {label:'🔴 Stock bajo',    color:'var(--danger)', bg:'#ff4d6a08'},
-    atencion:{label:'⚠️ Atención',      color:'var(--warn)',   bg:'#ffb34710'},
-    ok:      {label:'✅ OK',            color:'var(--success)',bg:''},
-    sin_dato:{label:'— Sin dato',       color:'var(--text3)',  bg:''},
-  };
-
-  const totalOrden = resultados.reduce((a,r)=>a+r.ordenCompra,0);
-  const criticos   = resultados.filter(r=>r.estado==='critico'||r.estado==='bajo').length;
-
-  return `
-    <div class="card" style="margin-bottom:12px">
-      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px">
-        <div class="section-title" style="margin:0">🛒 Recomendación de Compra</div>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <div style="font-size:12px;color:var(--text2)">Semanas a cubrir:</div>
-          <input type="number" min="1" max="26" value="${sc}"
-            style="width:52px;padding:4px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;color:var(--text);text-align:center;font-size:13px"
-            onchange="state.config.compras.semanasCobertura=+this.value;guardarConfig();renderTab()">
-          <div style="font-size:12px;color:var(--text2)">+ buffer:</div>
-          <input type="number" min="0" max="12" value="${sb}"
-            style="width:52px;padding:4px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;color:var(--text);text-align:center;font-size:13px"
-            onchange="state.config.compras.semanaBuffer=+this.value;guardarConfig();renderTab()">
-          <div style="font-size:12px;color:var(--text3)">= ${sc+sb} sem. total</div>
-        </div>
-      </div>
-      <div style="font-size:11px;color:var(--text3);margin-bottom:12px">
-        Stock actual = última col B del Excel cargado · Consumo semanal = promedio histórico (${meses.length} mes${meses.length!==1?'es':''})
-      </div>
-
-      ${criticos>0?`<div style="background:#ff4d6a12;border:1px solid var(--danger);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px;color:var(--danger);font-weight:600">
-        ⛔ ${criticos} tipología${criticos!==1?'s':''} con stock crítico o bajo — orden urgente recomendada
-      </div>`:''}
-
-      <div style="overflow-x:auto">
-        <table class="data-table">
-          <thead><tr>
-            <th>Tipología</th>
-            <th>Cons. semanal</th>
-            <th>Stock actual</th>
-            <th>Semanas c/stock</th>
-            <th>Necesidad total</th>
-            <th style="color:var(--accent)">Orden de compra</th>
-            <th>Estado</th>
-          </tr></thead>
-          <tbody>
-          ${resultados.map(r=>{
-            const e = ESTADO[r.estado];
-            const stockColor = r.estado==='critico'?'var(--danger)':r.estado==='bajo'?'var(--danger)':r.estado==='atencion'?'var(--warn)':'var(--text)';
-            const stockManual = state.config.compras?.stockManual?.[r.tipo];
-            return `<tr style="background:${e.bg}">
-              <td>
-                <span class="tipo-badge">${r.tipo}</span>
-                ${stockManual!==undefined&&stockManual!==''?`<span style="font-size:9px;color:var(--accent);margin-left:4px">✎ manual</span>`:''}
-              </td>
-              <td style="font-family:var(--mono);text-align:center">${r.consumoSemanal.toFixed(1)}</td>
-              <td>
-                <div style="display:flex;align-items:center;gap:6px">
-                  <span style="font-family:var(--mono);font-size:15px;font-weight:700;color:${stockColor}">
-                    ${r.stockActual!==null?r.stockActual:'?'}
-                  </span>
-                  <input type="number"
-                    value="${stockManual!==undefined&&stockManual!==''?stockManual:''}"
-                    placeholder="${r.stockActual!==null?r.stockActual:'auto'}"
-                    title="Override manual del stock actual"
-                    style="width:58px;padding:3px 6px;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;color:var(--text);font-size:11px;font-family:var(--mono)"
-                    onchange="setStockManual('${r.tipo}',this.value)">
-                </div>
-              </td>
-              <td style="font-family:var(--mono);text-align:center;color:${stockColor}">
-                ${r.semanasConStock!==null?r.semanasConStock+'s':'—'}
-              </td>
-              <td style="font-family:var(--mono);text-align:center">${r.necesidadTotal}</td>
-              <td style="text-align:center">
-                <span style="font-family:var(--mono);font-size:${r.ordenCompra>0?'20':'14'}px;font-weight:700;color:${r.ordenCompra>0?'var(--accent)':'var(--text3)'}">
-                  ${r.ordenCompra>0?r.ordenCompra:'✓'}
-                </span>
-                ${r.ordenCompra>0?`<div style="font-size:10px;color:var(--text3)">planchas</div>`:''}
-              </td>
-              <td style="text-align:center">
-                <span style="font-size:12px;color:${e.color};font-weight:600">${e.label}</span>
-              </td>
-            </tr>`;
-          }).join('')}
-          </tbody>
-          <tfoot>
-            <tr style="background:var(--bg3)">
-              <td style="font-weight:700">TOTAL</td>
-              <td></td><td></td><td></td><td></td>
-              <td style="text-align:center;font-family:var(--mono);font-size:18px;font-weight:700;color:var(--accent)">${totalOrden}</td>
-              <td></td>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
-      <div style="font-size:11px;color:var(--text3);margin-top:10px">
-        Orden = MAX(0, (${sc}+${sb} sem. × cons. semanal) − stock actual) · El campo de stock manual sobreescribe el valor del Excel.
-      </div>
-    </div>`;
-}
-
-function setStockManual(tipo, valor) {
-  if(!state.config.compras) state.config.compras = {};
-  if(!state.config.compras.stockManual) state.config.compras.stockManual = {};
-  if(valor===''||valor===null) {
-    delete state.config.compras.stockManual[tipo];
-  } else {
-    state.config.compras.stockManual[tipo] = Number(valor);
-  }
-  guardarConfig();
-  // No re-renderizar tab completo para no perder foco del input
-}
+// ===== ANÁLISIS DE STOCK CERO =====
 
 const TIPOS_ANALISIS = ['F4','L3+3','L4+4','L5+5','L6+6','L4+4BSL','L3+3 ESM'];
 const MESES_NUMERO = {Enero:0,Febrero:1,Marzo:2,Abril:3,Mayo:4,Junio:5,Julio:6,Agosto:7,Septiembre:8,Octubre:9,Noviembre:10,Diciembre:11};
@@ -3685,7 +3479,7 @@ function renderAnalisis() {
       <div style="font-size:12px;color:var(--text2)">${tiposActivos.length} tipologías · ${meses.join(' · ')}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
         <button class="btn btn-accent btn-sm" onclick="exportPDFAnalisis()">📄 Informe PDF</button>
-        <button class="btn btn-sm" style="background:var(--bg4);border:1px solid #4a90d9;color:#4a90d9" onclick="exportInformeDirectorio()">🎯 Informe Directorio</button>
+        <button class="btn btn-sm" style="background:var(--bg4);border:1px solid #4a90d9;color:#4a90d9" onclick="mostrarChecklistInforme()">🎯 Informe Directorio</button>
       </div>
     </div>
 
@@ -3716,9 +3510,78 @@ function renderAnalisis() {
     ${renderSectionCompras()}
 
     <div class="card" style="margin-bottom:12px">
-      <div class="section-title">Días con stock ≤ 0 por tipología</div>
-      <div class="chart-wrap" style="height:200px"><canvas id="chartAnalisisBar"></canvas></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <div class="section-title" style="margin:0">Consumo × mes por tipología</div>
+        <div style="font-size:11px;color:var(--text3)">Consumo neto · entre paréntesis: ingresos</div>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="data-table" style="font-size:12px">
+          <thead><tr>
+            <th>Tipología</th>
+            ${meses.map(m=>`<th style="text-align:center">${m.slice(0,3)}</th>`).join('')}
+            <th style="text-align:center">Total</th>
+          </tr></thead>
+          <tbody>
+          ${tiposActivos.map(tipo => {
+            let totalCons = 0;
+            const celdas = meses.map(mes => {
+              const d = state.data[mes];
+              const c = getValTipo(d?.consumo, tipo);
+              const dcD = getValTipo(d?.descuentos_daños, tipo);
+              const dcP = getValTipo(d?.descuentos_proveedor, tipo);
+              const cn = Math.max(0, c - dcD - dcP);
+              const ing = getValTipo(d?.ingresos, tipo);
+              totalCons += cn;
+              if(cn === 0 && ing === 0) return `<td style="text-align:center;color:var(--text3)">—</td>`;
+              const balance = ing - cn;
+              const balColor = balance < 0 ? 'color:var(--danger)' : balance > 0 ? 'color:var(--success)' : '';
+              return `<td style="text-align:center;font-family:var(--mono)">
+                <span style="font-weight:600">${cn}</span>
+                ${ing > 0 ? `<br><span style="font-size:10px;${balColor}">(${ing})</span>` : ''}
+              </td>`;
+            }).join('');
+            if(totalCons === 0) return '';
+            return `<tr>
+              <td><span class="tipo-badge">${tipo}</span></td>
+              ${celdas}
+              <td style="text-align:center;font-family:var(--mono);font-weight:700;color:var(--accent)">${totalCons}</td>
+            </tr>`;
+          }).filter(Boolean).join('')}
+          </tbody>
+          <tfoot><tr style="background:var(--bg3)">
+            <td style="font-weight:700;font-size:11px">TOTAL</td>
+            ${meses.map(mes => {
+              const d = state.data[mes];
+              let c=0, ing=0;
+              tiposActivos.forEach(t=>{
+                const cons=getValTipo(d?.consumo,t);
+                const dcD=getValTipo(d?.descuentos_daños,t);
+                const dcP=getValTipo(d?.descuentos_proveedor,t);
+                c+=Math.max(0,cons-dcD-dcP);
+                ing+=getValTipo(d?.ingresos,t);
+              });
+              return `<td style="text-align:center;font-family:var(--mono);font-weight:700;font-size:12px">
+                ${c}<br><span style="font-size:10px;color:var(--text3)">(${ing})</span>
+              </td>`;
+            }).join('')}
+            <td style="text-align:center;font-family:var(--mono);font-weight:700;color:var(--accent)">
+              ${tiposActivos.reduce((acc,t)=>{
+                meses.forEach(mes=>{
+                  const d=state.data[mes];
+                  const c=getValTipo(d?.consumo,t);
+                  const dcD=getValTipo(d?.descuentos_daños,t);
+                  const dcP=getValTipo(d?.descuentos_proveedor,t);
+                  acc+=Math.max(0,c-dcD-dcP);
+                });
+                return acc;
+              },0)}
+            </td>
+          </tfoot>
+        </table>
+      </div>
     </div>
+
+    <div class="card" style="margin-bottom:12px">
     <div class="card" style="margin-bottom:12px">
       <div class="section-title">Consumo vs Ingresos — período completo</div>
       <div class="chart-wrap" style="height:200px"><canvas id="chartAnalisisCI"></canvas></div>
@@ -4055,39 +3918,174 @@ function exportPDFAnalisis() {
   toast('📄 Informe PDF exportado ✓');
 }
 
+// ===== ANÁLISIS DE COMPRAS =====
+
+function getStockActual(tipo) {
+  const manual = state.config.compras?.stockManual?.[tipo];
+  if(manual!==undefined&&manual!==null&&manual!=='') return Number(manual);
+  const mesesRev = [...getMeses()].reverse();
+  for(const mes of mesesRev){
+    const d=state.data[mes]; if(!d?.stock_por_dia) continue;
+    const dias=d.stock_por_dia[tipo]||d.stock_por_dia[tipo?.replace('L4+4BSL','L4+4 BSL')]||d.stock_por_dia[tipo?.replace('L4+4 BSL','L4+4BSL')];
+    if(!dias) continue;
+    const ult=Math.max(...Object.keys(dias).map(Number));
+    return dias[ult];
+  }
+  return null;
+}
+
+function getConsumoPorSemana(tipo) {
+  const meses=getMeses(); let totalCons=0,totalSem=0;
+  meses.forEach(mes=>{
+    const d=state.data[mes]; if(!d) return;
+    const c=getValTipo(d.consumo,tipo);
+    const dcD=getValTipo(d.descuentos_daños,tipo);
+    const dcP=getValTipo(d.descuentos_proveedor,tipo);
+    const cn=Math.max(0,c-dcD-dcP);
+    if(cn===0) return;
+    totalCons+=cn; totalSem+=diasHabiles(mes)/5;
+  });
+  return totalSem>0?totalCons/totalSem:0;
+}
+
+function calcRecomendacionCompra(tipo) {
+  const cfg=state.config.compras||{};
+  const sc=Number(cfg.semanasCobertura)||4;
+  const sb=Number(cfg.semanaBuffer)||2;
+  const total=sc+sb;
+  const cw=getConsumoPorSemana(tipo);
+  const sa=getStockActual(tipo);
+  const nec=Math.ceil(total*cw);
+  const stock=sa!==null?sa:0;
+  const orden=Math.max(0,nec-stock);
+  const scs=cw>0&&sa!==null?(sa/cw).toFixed(1):null;
+  const estado=sa===null?'sin_dato':sa<=0?'critico':Number(scs)<sb?'bajo':Number(scs)<sc?'atencion':'ok';
+  return{tipo,consumoSemanal:cw,stockActual:sa,necesidadTotal:nec,ordenCompra:orden,semanasConStock:scs,estado,semanasCobertura:sc,semanaBuffer:sb};
+}
+
+function setStockManual(tipo,valor){
+  if(!state.config.compras)state.config.compras={};
+  if(!state.config.compras.stockManual)state.config.compras.stockManual={};
+  if(valor===''||valor===null){delete state.config.compras.stockManual[tipo];}
+  else{state.config.compras.stockManual[tipo]=Number(valor);}
+  guardarConfig();
+}
+
+function renderSectionCompras(){
+  const tipos=getTiposSeleccionados();
+  const cfg=state.config.compras||{};
+  const sc=Number(cfg.semanasCobertura)||4;
+  const sb=Number(cfg.semanaBuffer)||2;
+  const meses=getMeses();
+  const res=tipos.map(calcRecomendacionCompra).filter(r=>r.consumoSemanal>0)
+    .sort((a,b)=>{const o={critico:0,bajo:1,atencion:2,sin_dato:3,ok:4};return(o[a.estado]??5)-(o[b.estado]??5);});
+  const E={
+    critico:{label:'⛔ Sin stock',    color:'var(--danger)',  bg:'#ff4d6a12'},
+    bajo:   {label:'🔴 Stock bajo',   color:'var(--danger)',  bg:'#ff4d6a08'},
+    atencion:{label:'⚠️ Atención',    color:'var(--warn)',    bg:'#ffb34710'},
+    ok:     {label:'✅ OK',           color:'var(--success)', bg:''},
+    sin_dato:{label:'— Sin dato',     color:'var(--text3)',   bg:''},
+  };
+  const total=res.reduce((a,r)=>a+r.ordenCompra,0);
+  const crit=res.filter(r=>r.estado==='critico'||r.estado==='bajo').length;
+  return `
+    <div class="card" style="margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px">
+        <div class="section-title" style="margin:0">🛒 Recomendación de Compra</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <div style="font-size:12px;color:var(--text2)">Semanas a cubrir:</div>
+          <input type="number" min="1" max="26" value="${sc}"
+            style="width:52px;padding:4px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;color:var(--text);text-align:center;font-size:13px"
+            onchange="state.config.compras.semanasCobertura=+this.value;guardarConfig();renderTab()">
+          <div style="font-size:12px;color:var(--text2)">+ buffer:</div>
+          <input type="number" min="0" max="12" value="${sb}"
+            style="width:52px;padding:4px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;color:var(--text);text-align:center;font-size:13px"
+            onchange="state.config.compras.semanaBuffer=+this.value;guardarConfig();renderTab()">
+          <div style="font-size:12px;color:var(--text3)">= ${sc+sb} sem.</div>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:10px">
+        Stock actual = última col B del Excel · Consumo semanal = promedio histórico (${meses.length} mes${meses.length!==1?'es':''})
+      </div>
+      ${crit>0?`<div style="background:#ff4d6a12;border:1px solid var(--danger);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px;color:var(--danger);font-weight:600">
+        ⛔ ${crit} tipología${crit!==1?'s':''} con stock crítico — orden urgente recomendada</div>`:''}
+      <div style="overflow-x:auto"><table class="data-table">
+        <thead><tr>
+          <th>Tipología</th><th>Cons./sem.</th><th>Stock actual</th>
+          <th>Sem. c/stock</th><th>Necesidad</th><th style="color:var(--accent)">Orden compra</th><th>Estado</th>
+        </tr></thead>
+        <tbody>
+        ${res.map(r=>{
+          const e=E[r.estado];
+          const sc2=r.estado==='critico'?'var(--danger)':r.estado==='bajo'?'var(--danger)':r.estado==='atencion'?'var(--warn)':'var(--text)';
+          const sm=state.config.compras?.stockManual?.[r.tipo];
+          return `<tr style="background:${e.bg}">
+            <td><span class="tipo-badge">${r.tipo}</span>${sm!==undefined&&sm!==''?'<span style="font-size:9px;color:var(--accent);margin-left:4px">✎</span>':''}</td>
+            <td style="font-family:var(--mono);text-align:center">${r.consumoSemanal.toFixed(1)}</td>
+            <td>
+              <div style="display:flex;align-items:center;gap:6px">
+                <span style="font-family:var(--mono);font-size:15px;font-weight:700;color:${sc2}">${r.stockActual!==null?r.stockActual:'?'}</span>
+                <input type="number" value="${sm!==undefined&&sm!==''?sm:''}" placeholder="auto"
+                  style="width:56px;padding:3px 6px;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;color:var(--text);font-size:11px;font-family:var(--mono)"
+                  onchange="setStockManual('${r.tipo}',this.value)">
+              </div>
+            </td>
+            <td style="font-family:var(--mono);text-align:center;color:${sc2}">${r.semanasConStock!==null?r.semanasConStock+'s':'—'}</td>
+            <td style="font-family:var(--mono);text-align:center">${r.necesidadTotal}</td>
+            <td style="text-align:center">
+              <span style="font-family:var(--mono);font-size:${r.ordenCompra>0?'20':'14'}px;font-weight:700;color:${r.ordenCompra>0?'var(--accent)':'var(--text3)'}">
+                ${r.ordenCompra>0?r.ordenCompra:'✓'}
+              </span>
+            </td>
+            <td style="text-align:center;font-size:12px;color:${e.color};font-weight:600">${e.label}</td>
+          </tr>`;
+        }).join('')}
+        </tbody>
+        <tfoot><tr style="background:var(--bg3)">
+          <td style="font-weight:700">TOTAL</td><td></td><td></td><td></td><td></td>
+          <td style="text-align:center;font-family:var(--mono);font-size:18px;font-weight:700;color:var(--accent)">${total}</td>
+          <td></td>
+        </tr></tfoot>
+      </table></div>
+      <div style="font-size:11px;color:var(--text3);margin-top:8px">Orden = MAX(0, ${sc+sb} sem. × cons. semanal − stock actual)</div>
+    </div>`;
+}
+
+// ===== CHECKLIST + INFORME DIRECTORIO =====
+
 function mostrarChecklistInforme() {
-  const secciones = [
-    {id:'s1', label:'1 — Resumen ejecutivo (KPIs globales)', default:true},
-    {id:'s2', label:'2 — Consumo vs Ingresos por mes', default:true},
-    {id:'s3', label:'3 — Consumo vs Ingresos por tipología', default:true},
-    {id:'s3b',label:'3b — Matriz tipología × mes (desglose completo)', default:true},
-    {id:'s4', label:'4 — Días de parada por quiebre de stock', default:true},
-    {id:'s5', label:'5 — Reclamos de calidad (Sector Calidad)', default:true},
-    {id:'s6', label:'6 — Recomendación de compra mensual', default:true},
+  const SECS = [
+    {id:'s1', label:'1 — Resumen ejecutivo (KPIs globales)'},
+    {id:'s2', label:'2 — Consumo vs Ingresos por mes'},
+    {id:'s3', label:'3 — Consumo vs Ingresos por tipología'},
+    {id:'s3b',label:'3b — Matriz tipología × mes (desglose completo)'},
+    {id:'s4', label:'4 — Días de parada por quiebre de stock'},
+    {id:'s5', label:'5 — Reclamos de calidad (Sector Calidad)'},
+    {id:'s6', label:'6 — Recomendación de compra mensual'},
   ];
   const saved = (() => { try { return JSON.parse(localStorage.getItem('sv_informe_secciones')||'null'); } catch(e){return null;} })();
-
   const modal = document.createElement('div');
-  modal.style.cssText='position:fixed;inset:0;background:#0008;z-index:9999;display:flex;align-items:center;justify-content:center';
+  modal.id = 'modalChecklistInforme';
+  modal.style.cssText='position:fixed;inset:0;background:#0009;z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
   modal.innerHTML=`
-    <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:16px;padding:28px;width:90%;max-width:480px;max-height:85vh;overflow-y:auto">
-      <div style="font-size:17px;font-weight:700;margin-bottom:6px">🎯 Informe Directorio</div>
-      <div style="font-size:12px;color:var(--text2);margin-bottom:18px">Seleccioná las secciones a incluir</div>
-      ${secciones.map(s=>`
-        <label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;cursor:pointer;transition:background .1s;margin-bottom:4px;border:1px solid var(--border)"
+    <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:16px;padding:28px;width:100%;max-width:480px;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px #0006">
+      <div style="font-size:18px;font-weight:700;margin-bottom:6px">🎯 Informe Directorio</div>
+      <div style="font-size:13px;color:var(--text2);margin-bottom:18px">Seleccioná las secciones a incluir en el PDF</div>
+      ${SECS.map(s=>`
+        <label style="display:flex;align-items:center;gap:12px;padding:11px 14px;border-radius:10px;cursor:pointer;margin-bottom:6px;border:1px solid var(--border);user-select:none" 
           onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background=''">
-          <input type="checkbox" id="chk_${s.id}" ${(saved?saved[s.id]:s.default)?'checked':''}
-            style="width:16px;height:16px;accent-color:var(--accent);cursor:pointer">
+          <input type="checkbox" id="chk_${s.id}" ${(saved?saved[s.id]!==false:true)?'checked':''}
+            style="width:17px;height:17px;accent-color:var(--accent);cursor:pointer;flex-shrink:0">
           <span style="font-size:13px">${s.label}</span>
         </label>
       `).join('')}
       <div style="display:flex;gap:10px;margin-top:20px">
-        <button onclick="this.closest('div[style*=fixed]').remove()"
-          style="flex:1;padding:10px;border-radius:10px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer;font-size:13px">
+        <button onclick="document.getElementById('modalChecklistInforme').remove()"
+          style="flex:1;padding:11px;border-radius:10px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer;font-size:13px;font-family:var(--font)">
           Cancelar
         </button>
-        <button onclick="generarInformeConChecklist(this)"
-          style="flex:2;padding:10px;border-radius:10px;border:none;background:var(--accent);color:#000;cursor:pointer;font-size:13px;font-weight:700">
+        <button onclick="generarInformeDesdeChecklist()"
+          style="flex:2;padding:11px;border-radius:10px;border:none;background:var(--accent);color:#000;cursor:pointer;font-size:13px;font-weight:700;font-family:var(--font)">
           📄 Generar PDF
         </button>
       </div>
@@ -4096,50 +4094,43 @@ function mostrarChecklistInforme() {
   modal.addEventListener('click', e=>{ if(e.target===modal) modal.remove(); });
 }
 
-function generarInformeConChecklist(btn) {
-  const modal = btn.closest('div[style*=fixed]');
-  const secciones = {};
-  ['s1','s2','s3','s3b','s4','s5','s6'].forEach(id=>{
-    const el = document.getElementById('chk_'+id);
-    secciones[id] = el ? el.checked : true;
-  });
-  localStorage.setItem('sv_informe_secciones', JSON.stringify(secciones));
-  modal.remove();
-  exportInformeDirectorio(secciones);
+function generarInformeDesdeChecklist() {
+  const ids = ['s1','s2','s3','s3b','s4','s5','s6'];
+  const secs = {};
+  ids.forEach(id=>{ const el=document.getElementById('chk_'+id); secs[id]=el?el.checked:true; });
+  localStorage.setItem('sv_informe_secciones', JSON.stringify(secs));
+  const modal = document.getElementById('modalChecklistInforme');
+  if(modal) modal.remove();
+  exportInformeDirectorio(secs);
 }
 
 function exportInformeDirectorio(secciones) {
-  if(!secciones) { mostrarChecklistInforme(); return; }
-  const {jsPDF} = window.jspdf;
-  const doc = new jsPDF({orientation:'portrait', unit:'mm', format:'a4'});
-  const W = doc.internal.pageSize.getWidth();
-  const H = doc.internal.pageSize.getHeight();
-  const meses = getMeses();
-  const fecha = new Date().toLocaleDateString('es-AR',{day:'2-digit',month:'long',year:'numeric'});
+  if(!secciones){mostrarChecklistInforme();return;}
+  const {jsPDF}=window.jspdf;
+  const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+  const W=doc.internal.pageSize.getWidth();
+  const H=doc.internal.pageSize.getHeight();
+  const meses=getMeses();
+  const fecha=new Date().toLocaleDateString('es-AR',{day:'2-digit',month:'long',year:'numeric'});
 
-  let y = 0;
-  function newPageIfNeeded(needed=30) {
-    if(y+needed>H-16){doc.addPage();y=14;}
-  }
-  function sectionTitle(txt, color=[0,120,180]) {
-    newPageIfNeeded(18);
-    doc.setFillColor(...color);
-    doc.roundedRect(14,y,W-28,9,2,2,'F');
+  let y=0;
+  function newPage(n=30){if(y+n>H-16){doc.addPage();y=14;}}
+  function secTitle(txt,color=[0,120,180]){
+    newPage(18);
+    doc.setFillColor(...color);doc.roundedRect(14,y,W-28,9,2,2,'F');
     doc.setFont('helvetica','bold');doc.setFontSize(10);doc.setTextColor(255,255,255);
-    doc.text(txt.toUpperCase(),18,y+6.2);
-    y+=13;
+    doc.text(txt.toUpperCase(),18,y+6.2);y+=13;
   }
-  function kpiRow(items) {
+  function kpiRow(items){
     const kw=(W-28)/items.length-2;
     items.forEach((k,i)=>{
       const kx=14+i*(kw+2.67);
       doc.setFillColor(245,247,252);doc.roundedRect(kx,y,kw,18,2,2,'F');
-      const [r,g,b]=k.color||[0,120,180];
+      const[r,g,b]=k.color||[0,120,180];
       doc.setFillColor(r,g,b);doc.roundedRect(kx,y,kw,2,1,1,'F');
       doc.setFont('helvetica','normal');doc.setFontSize(7);doc.setTextColor(120,120,140);
       doc.text(String(k.label).toUpperCase(),kx+4,y+7);
-      doc.setFont('helvetica','bold');
-      doc.setFontSize(String(k.value).length>6?11:14);
+      doc.setFont('helvetica','bold');doc.setFontSize(String(k.value).length>6?11:14);
       doc.setTextColor(r,g,b);doc.text(String(k.value),kx+4,y+15);
     });
     y+=22;
@@ -4154,337 +4145,225 @@ function exportInformeDirectorio(secciones) {
   doc.text('Resumen de Gestión de Stock',14,28);
   doc.setFont('helvetica','normal');doc.setFontSize(9);doc.setTextColor(150,150,170);
   doc.text(`Período: ${meses[0]} — ${meses[meses.length-1]}  ·  Generado: ${fecha}`,14,39);
-  doc.text(`Preparado por: ${state.user?.nombre||''} · ${state.user?.cargo||''}`,14,46);
+  doc.text(`Preparado por: ${state.user?.nombre||''}`,14,46);
   y=60;
 
-  // Calcular totales globales
-  let totalConsumo=0,totalIngresos=0,totalDaños=0,totalFalla=0;
-  meses.forEach(m=>{
-    const d=state.data[m]; if(!d) return;
-    Object.values(d.consumo||{}).forEach(v=>totalConsumo+=v);
-    Object.values(d.ingresos||{}).forEach(v=>totalIngresos+=v);
-    Object.values(d.descuentos_daños||{}).forEach(v=>totalDaños+=v);
-    Object.values(d.descuentos_proveedor||{}).forEach(v=>totalFalla+=v);
+  // Calcular totales
+  let tCons=0,tIng=0,tDaños=0,tFalla=0;
+  meses.forEach(m=>{const d=state.data[m];if(!d)return;
+    Object.values(d.consumo||{}).forEach(v=>tCons+=v);
+    Object.values(d.ingresos||{}).forEach(v=>tIng+=v);
+    Object.values(d.descuentos_daños||{}).forEach(v=>tDaños+=v);
+    Object.values(d.descuentos_proveedor||{}).forEach(v=>tFalla+=v);
   });
-  const tiposAnalisis = getTiposSeleccionados();
-  const resultados = tiposAnalisis.map(calcStockCeroTipo);
-  const totalDiasQuiebre = resultados.reduce((a,r)=>a+r.totalDias,0);
-  const peor = resultados.filter(r=>r.totalCons>0).sort((a,b)=>b.totalDias-a.totalDias)[0]||resultados[0];
-  const totalReclamos = state.reclamos.length;
-  const planchasFalladas = state.reclamos.reduce((acc,r)=>{
-    acc[r.tipo||'Sin tipo']=(acc[r.tipo||'Sin tipo']||0)+1; return acc;
-  },{});
-  const totalPlanchasFalladas = Object.values(planchasFalladas).reduce((a,b)=>a+b,0);
+  const tiposA=getTiposSeleccionados();
+  const resA=tiposA.map(calcStockCeroTipo);
+  const totalDias=resA.reduce((a,r)=>a+r.totalDias,0);
+  const peor=resA.filter(r=>r.totalCons>0).sort((a,b)=>b.totalDias-a.totalDias)[0]||resA[0];
+  const totalRec=state.reclamos.length;
+  const pfAll=state.reclamos.reduce((acc,r)=>{acc[r.tipo||'Sin tipo']=(acc[r.tipo||'Sin tipo']||0)+1;return acc;},{});
+  const totalPF=Object.values(pfAll).reduce((a,b)=>a+b,0);
 
-  // ── SECCIÓN 1: RESUMEN EJECUTIVO ──────────────────────────────────────────
-  if(secciones.s1!==false) {
-  sectionTitle('1 — Resumen Ejecutivo del Período',[8,8,20]);
-  kpiRow([
-    {label:'Total consumo',    value:`${totalConsumo} pl.`,    color:[0,100,180]},
-    {label:'Total ingresos',   value:`${totalIngresos} pl.`,   color:[0,150,100]},
-    {label:'Días parada total',value:String(totalDiasQuiebre), color:[220,50,50]},
-    {label:'Reclamos calidad', value:`${totalReclamos} pl.`,   color:[200,100,0]},
-  ]);
-  if(totalDiasQuiebre>0){
-    doc.setFillColor(255,240,240);doc.setDrawColor(220,50,50);doc.setLineWidth(0.5);
-    doc.roundedRect(14,y,W-28,11,2,2,'FD');
-    doc.setFillColor(220,50,50);doc.roundedRect(14,y,3,11,1,1,'F');
-    doc.setFont('helvetica','bold');doc.setFontSize(9.5);doc.setTextColor(180,30,30);
-    doc.text(`⚠  ${totalDiasQuiebre} días con stock cero — tipología más crítica: ${peor?.tipo||'—'} (${peor?.totalDias||0}d)`,20,y+7.5);
-    y+=16;
-  }
-  } // fin s1
-
-  // ── SECCIÓN 2: CONSUMO VS INGRESOS POR MES ────────────────────────────────
-  if(secciones.s2!==false) {
-  y+=4; sectionTitle('2 — Consumo vs Ingresos por Mes',[0,100,160]);
-  const mesRows=meses.map(m=>{
-    const d=state.data[m]; if(!d) return[m,'—','—','—','—','—'];
-    let c=0,i=0,da=0,fa=0;
-    Object.values(d.consumo||{}).forEach(v=>c+=v);
-    Object.values(d.ingresos||{}).forEach(v=>i+=v);
-    Object.values(d.descuentos_daños||{}).forEach(v=>da+=v);
-    Object.values(d.descuentos_proveedor||{}).forEach(v=>fa+=v);
-    const bal=i-c; return[m,c,i,bal>=0?'+'+bal:String(bal),da,fa];
-  });
-  doc.autoTable({
-    head:[['Mes','Consumo (pl.)','Ingresos (pl.)','Balance','Daños/Roturas','Falla Prov.']],
-    body:mesRows,startY:y,
-    styles:{fontSize:9,cellPadding:4,textColor:[30,30,50]},
-    headStyles:{fillColor:[0,100,160],textColor:[255,255,255],fontStyle:'bold',fontSize:9},
-    alternateRowStyles:{fillColor:[245,248,252]},
-    columnStyles:{0:{fontStyle:'bold',textColor:[0,70,130]},3:{halign:'center',fontStyle:'bold'},4:{halign:'center'},5:{halign:'center'}},
-    didParseCell(d){if(d.section==='body'&&d.column.index===3){const v=d.cell.text[0];d.cell.styles.textColor=v.startsWith('-')?[200,50,50]:[0,140,80];}},
-    foot:[['TOTAL',totalConsumo,totalIngresos,(totalIngresos-totalConsumo)>=0?'+'+(totalIngresos-totalConsumo):String(totalIngresos-totalConsumo),totalDaños,totalFalla]],
-    footStyles:{fillColor:[20,20,40],textColor:[0,200,255],fontStyle:'bold',fontSize:9},
-    margin:{left:14,right:14},
-  });
-  y=doc.lastAutoTable.finalY+10;
-  } // fin s2
-
-  // ── SECCIÓN 3: CONSUMO VS INGRESOS POR TIPOLOGÍA ──────────────────────────
-  if(secciones.s3!==false) {
-  newPageIfNeeded(10); sectionTitle('3 — Consumo vs Ingresos por Tipología',[0,100,160]);
+  // Construir tipoTotales (usado en s3, s3b)
   const tipoTotales={};
-  meses.forEach(m=>{
-    const d=state.data[m]; if(!d) return;
-    const sumar=(obj,k)=>Object.entries(obj||{}).forEach(([t,v])=>{
-      if(!tipoTotales[t])tipoTotales[t]={c:0,i:0,da:0,fa:0};
-      tipoTotales[t][k]+=v;
-    });
-    sumar(d.consumo,'c');sumar(d.ingresos,'i');sumar(d.descuentos_daños,'da');sumar(d.descuentos_proveedor,'fa');
+  meses.forEach(m=>{const d=state.data[m];if(!d)return;
+    const s=(obj,k)=>Object.entries(obj||{}).forEach(([t,v])=>{if(!tipoTotales[t])tipoTotales[t]={c:0,i:0,da:0,fa:0};tipoTotales[t][k]+=v;});
+    s(d.consumo,'c');s(d.ingresos,'i');s(d.descuentos_daños,'da');s(d.descuentos_proveedor,'fa');
   });
-  const tipoRows=Object.entries(tipoTotales).sort((a,b)=>b[1].c-a[1].c).map(([t,v])=>{
-    const bal=v.i-v.c; return[t,v.c,v.i,bal>=0?'+'+bal:String(bal),v.da,v.fa];
-  });
-  doc.autoTable({
-    head:[['Tipología','Consumo (pl.)','Ingresos (pl.)','Balance','Daños/Roturas','Falla Prov.']],
-    body:tipoRows,startY:y,
-    styles:{fontSize:9,cellPadding:4,textColor:[30,30,50]},
-    headStyles:{fillColor:[0,100,160],textColor:[255,255,255],fontStyle:'bold',fontSize:9},
-    alternateRowStyles:{fillColor:[245,248,252]},
-    columnStyles:{0:{fontStyle:'bold',textColor:[0,70,130]},3:{halign:'center',fontStyle:'bold'},4:{halign:'center'},5:{halign:'center'}},
-    didParseCell(d){if(d.section==='body'&&d.column.index===3){const v=d.cell.text[0];d.cell.styles.textColor=v.startsWith('-')?[200,50,50]:[0,140,80];}},
-    margin:{left:14,right:14},
-  });
-  y=doc.lastAutoTable.finalY+10;
-  } // fin s3
 
-  // Recalcular tipoTotales si s3 estaba off (lo necesitan s3b y s6)
-  if(secciones.s3===false) {
-    if(typeof tipoTotales==='undefined'||!Object.keys(tipoTotales||{}).length) {
-      var tipoTotales={};
-      meses.forEach(m=>{
-        const d=state.data[m]; if(!d) return;
-        const sumar=(obj,k)=>Object.entries(obj||{}).forEach(([t,v])=>{if(!tipoTotales[t])tipoTotales[t]={c:0,i:0,da:0,fa:0};tipoTotales[t][k]+=v;});
-        sumar(d.consumo,'c');sumar(d.ingresos,'i');sumar(d.descuentos_daños,'da');sumar(d.descuentos_proveedor,'fa');
-      });
+  // S1
+  if(secciones.s1!==false){
+    secTitle('1 — Resumen Ejecutivo del Período',[8,8,20]);
+    kpiRow([
+      {label:'Total consumo',    value:`${tCons} pl.`,  color:[0,100,180]},
+      {label:'Total ingresos',   value:`${tIng} pl.`,   color:[0,150,100]},
+      {label:'Días parada total',value:String(totalDias),color:[220,50,50]},
+      {label:'Reclamos calidad', value:`${totalRec} pl.`,color:[200,100,0]},
+    ]);
+    if(totalDias>0){
+      doc.setFillColor(255,240,240);doc.setDrawColor(220,50,50);doc.setLineWidth(0.5);
+      doc.roundedRect(14,y,W-28,11,2,2,'FD');
+      doc.setFillColor(220,50,50);doc.roundedRect(14,y,3,11,1,1,'F');
+      doc.setFont('helvetica','bold');doc.setFontSize(9.5);doc.setTextColor(180,30,30);
+      doc.text(`⚠  ${totalDias} días con stock cero — tipología más crítica: ${peor?.tipo||'—'} (${peor?.totalDias||0}d)`,20,y+7.5);
+      y+=16;
     }
   }
 
-  // ── SECCIÓN 3b: MATRIZ TIPOLOGÍA × MES ────────────────────────────────────
-  if(secciones.s3b!==false) {
-  newPageIfNeeded(10);
-  sectionTitle('3b — Consumo por Tipología × Mes (desglose completo)',[0,80,140]);
-  doc.setFont('helvetica','italic');doc.setFontSize(8);doc.setTextColor(120,130,150);
-  doc.text('Consumo en planchas. Entre paréntesis: ingresos del mes.',14,y);y+=6;
-
-  // Construir la matriz: filas=tipologías, columnas=meses
-  const todasTipos = Object.keys(tipoTotales).sort((a,b)=>tipoTotales[b].c-tipoTotales[a].c);
-  const matrizHead = ['Tipología',...meses.map(m=>m.slice(0,3)),'Total'];
-  const matrizBody = todasTipos.map(tipo=>{
-    const fila = [tipo];
-    meses.forEach(m=>{
-      const d=state.data[m];
-      const c=d?.consumo?.[tipo]||0;
-      const i=d?.ingresos?.[tipo]||0;
-      fila.push(c>0||i>0 ? (c+(i>0?` (${i})`:'')) : '—');
+  // S2
+  if(secciones.s2!==false){
+    y+=4;secTitle('2 — Consumo vs Ingresos por Mes',[0,100,160]);
+    const rows=meses.map(m=>{const d=state.data[m];if(!d)return[m,'—','—','—','—','—'];
+      let c=0,i=0,da=0,fa=0;
+      Object.values(d.consumo||{}).forEach(v=>c+=v);Object.values(d.ingresos||{}).forEach(v=>i+=v);
+      Object.values(d.descuentos_daños||{}).forEach(v=>da+=v);Object.values(d.descuentos_proveedor||{}).forEach(v=>fa+=v);
+      const b=i-c;return[m,c,i,b>=0?'+'+b:String(b),da,fa];
     });
-    fila.push(tipoTotales[tipo]?.c||0);
-    return fila;
-  });
-  // Fila de totales por mes
-  const matrizFoot = ['TOTAL',...meses.map(m=>{
-    const d=state.data[m]; if(!d) return '—';
-    const c=sumObj(d.consumo||{});
-    const i=sumObj(d.ingresos||{});
-    return c+(i>0?` (${i})`:'');
-  }), totalConsumo];
-
-  doc.autoTable({
-    head:[matrizHead],
-    body:matrizBody,
-    foot:[matrizFoot],
-    startY:y,
-    styles:{fontSize:7.5,cellPadding:2.5,textColor:[30,30,50],halign:'center'},
-    headStyles:{fillColor:[0,80,140],textColor:[255,255,255],fontStyle:'bold',fontSize:8,halign:'center'},
-    alternateRowStyles:{fillColor:[245,248,252]},
-    columnStyles:{
-      0:{fontStyle:'bold',textColor:[0,60,110],halign:'left',cellWidth:28},
-      [meses.length+1]:{fontStyle:'bold',textColor:[0,60,110]},
-    },
-    footStyles:{fillColor:[20,20,40],textColor:[0,200,255],fontStyle:'bold',fontSize:8},
-    didParseCell(d){
-      if(d.section==='body'&&d.cell.text[0]!=='—'&&d.column.index>0){
-        d.cell.styles.textColor=[30,50,80];
-      }
-    },
-    margin:{left:14,right:14},
-  });
-  y=doc.lastAutoTable.finalY+10;
-  } // fin s3b
-
-  // ── SECCIÓN 4: DÍAS DE PARADA ──────────────────────────────────────────────
-  if(secciones.s4!==false) {
-  newPageIfNeeded(10); sectionTitle('4 — Días de Parada por Quiebre de Stock',[160,30,30]);
-  const analisisRows=resultados.filter(r=>r.totalCons>0).sort((a,b)=>b.totalDias-a.totalDias).map(r=>{
-    const pct=r.totalDH>0?(r.totalDias/r.totalDH*100).toFixed(0)+'%':'0%';
-    const status=r.totalDias===0?'Sin paradas':r.totalDias<=5?'Atención':'CRÍTICO';
-    const det=Object.entries(r.porMes).filter(([,rm])=>rm.dias>0).map(([m,rm])=>`${m.slice(0,3)}:${rm.dias}d`).join(' · ')||'—';
-    return[r.tipo,r.totalCons,r.totalDias+'d / '+r.totalDH+'d',pct,det,status];
-  });
-  doc.autoTable({
-    head:[['Tipología','Consumo','Días parada','% período','Detalle por mes','Estado']],
-    body:analisisRows,startY:y,
-    styles:{fontSize:8.5,cellPadding:3.5,textColor:[30,30,50]},
-    headStyles:{fillColor:[160,30,30],textColor:[255,255,255],fontStyle:'bold',fontSize:9},
-    alternateRowStyles:{fillColor:[252,245,245]},
-    columnStyles:{0:{fontStyle:'bold',textColor:[120,20,20]},2:{halign:'center',fontStyle:'bold'},3:{halign:'center'},4:{fontSize:7.5,textColor:[80,80,100]},5:{halign:'center',fontStyle:'bold'}},
-    didParseCell(d){if(d.section==='body'&&d.column.index===5){const v=d.cell.text[0];d.cell.styles.textColor=v==='CRÍTICO'?[200,50,50]:v==='Atención'?[180,100,0]:[0,140,80];}},
-    foot:[['TOTAL',resultados.reduce((a,r)=>a+r.totalCons,0),totalDiasQuiebre+'d acum.','—','—','—']],
-    footStyles:{fillColor:[20,20,40],textColor:[255,100,100],fontStyle:'bold',fontSize:9},
-    margin:{left:14,right:14},
-  });
-  y=doc.lastAutoTable.finalY+10;
-  } // fin s4
-
-  // ── SECCIÓN 5: RECLAMOS DE CALIDAD ────────────────────────────────────────
-  if(secciones.s5!==false) {
-  newPageIfNeeded(10); sectionTitle('5 — Reclamos de Calidad (Sector Calidad)',[140,70,0]);
-  if(state.reclamos.length===0){
-    doc.setFont('helvetica','italic');doc.setFontSize(10);doc.setTextColor(150,150,170);
-    doc.text('Sin reclamos registrados en el período.',14,y+6);y+=14;
-  } else {
-    const tiposFallados=Object.entries(planchasFalladas).sort((a,b)=>b[1]-a[1]);
-    const mesFallado=(()=>{const pm={};state.reclamos.forEach(r=>{pm[r.mes]=(pm[r.mes]||0)+1;});return Object.entries(pm).sort((a,b)=>b[1]-a[1])[0];})();
-    kpiRow([
-      {label:'Total reclamos',          value:String(totalReclamos),                                              color:[180,70,0]},
-      {label:'Tipología más reclamada', value:tiposFallados[0]?.[0]||'—',                                         color:[160,60,0]},
-      {label:'Mes con más reclamos',    value:mesFallado?.[0]?.split(' ')[0]||'—',                                 color:[140,50,0]},
-      {label:'% sobre consumo',         value:totalConsumo>0?(totalReclamos/totalConsumo*100).toFixed(1)+'%':'—', color:[120,40,0]},
-    ]);
-    // Por tipología
-    doc.setFont('helvetica','bold');doc.setFontSize(9);doc.setTextColor(120,60,0);
-    doc.text('Por tipología:',14,y);y+=5;
-    doc.autoTable({
-      head:[['Tipología','Cant. reclamos','% del total']],
-      body:tiposFallados.map(([t,n])=>[t,n,(n/totalReclamos*100).toFixed(1)+'%']),
-      startY:y,
-      styles:{fontSize:9,cellPadding:3.5,textColor:[30,30,50]},
-      headStyles:{fillColor:[140,70,0],textColor:[255,255,255],fontStyle:'bold',fontSize:9},
-      alternateRowStyles:{fillColor:[252,248,242]},
-      columnStyles:{0:{fontStyle:'bold',textColor:[100,50,0]},1:{halign:'center',fontStyle:'bold'},2:{halign:'center'}},
-      foot:[['TOTAL',totalPlanchasFalladas,'100%']],
-      footStyles:{fillColor:[20,20,40],textColor:[255,180,80],fontStyle:'bold',fontSize:9},
-      margin:{left:14,right:14},
-    });
-    y=doc.lastAutoTable.finalY+8;
-    // Por mes
-    newPageIfNeeded(10);
-    const recPorMes={};state.reclamos.forEach(r=>{recPorMes[r.mes]=(recPorMes[r.mes]||0)+1;});
-    doc.setFont('helvetica','bold');doc.setFontSize(9);doc.setTextColor(120,60,0);
-    doc.text('Por mes:',14,y);y+=5;
-    doc.autoTable({
-      head:[['Mes','Cant. reclamos','% del total']],
-      body:Object.entries(recPorMes).map(([m,n])=>[m,n,(n/totalReclamos*100).toFixed(1)+'%']),
-      startY:y,
-      styles:{fontSize:9,cellPadding:3.5,textColor:[30,30,50]},
-      headStyles:{fillColor:[140,70,0],textColor:[255,255,255],fontStyle:'bold',fontSize:9},
-      alternateRowStyles:{fillColor:[252,248,242]},
-      columnStyles:{0:{fontStyle:'bold'},1:{halign:'center',fontStyle:'bold'},2:{halign:'center'}},
-      foot:[['TOTAL',totalPlanchasFalladas,'100%']],
-      footStyles:{fillColor:[20,20,40],textColor:[255,180,80],fontStyle:'bold',fontSize:9},
-      margin:{left:14,right:14},
-    });
-    y=doc.lastAutoTable.finalY+8;
-    // Detalle completo
-    newPageIfNeeded(10);
-    doc.setFont('helvetica','bold');doc.setFontSize(9);doc.setTextColor(120,60,0);
-    doc.text('Detalle individual:',14,y);y+=5;
-    doc.autoTable({
-      head:[['Fecha','Tipología','Paquete','% Ok','Nro. Reclamo','Observaciones']],
-      body:state.reclamos.sort((a,b)=>new Date(a.fecha)-new Date(b.fecha)).map(r=>[
-        r.fecha?new Date(r.fecha+'T12:00').toLocaleDateString('es-AR'):'—',
-        r.tipo||'—', r.paquete||'—',
-        r.porcentaje!=null?r.porcentaje+'%':'—',
-        r.nroReclamo||'—',
-        r.observaciones?(r.observaciones.length>40?r.observaciones.slice(0,38)+'…':r.observaciones):'—',
-      ]),
-      startY:y,
-      styles:{fontSize:7.5,cellPadding:3,textColor:[30,30,50]},
-      headStyles:{fillColor:[140,70,0],textColor:[255,255,255],fontStyle:'bold',fontSize:8},
-      alternateRowStyles:{fillColor:[252,248,242]},
-      columnStyles:{0:{cellWidth:22},1:{fontStyle:'bold',cellWidth:26,textColor:[100,50,0]},2:{cellWidth:22,halign:'center'},3:{cellWidth:14,halign:'center'},4:{cellWidth:24,halign:'center'},5:{}},
-      margin:{left:14,right:14},
-    });
+    doc.autoTable({head:[['Mes','Consumo','Ingresos','Balance','Daños','Falla Prov.']],body:rows,startY:y,
+      styles:{fontSize:9,cellPadding:4,textColor:[30,30,50]},
+      headStyles:{fillColor:[0,100,160],textColor:[255,255,255],fontStyle:'bold'},
+      alternateRowStyles:{fillColor:[245,248,252]},
+      columnStyles:{0:{fontStyle:'bold'},3:{halign:'center',fontStyle:'bold'},4:{halign:'center'},5:{halign:'center'}},
+      didParseCell(d){if(d.section==='body'&&d.column.index===3){const v=d.cell.text[0];d.cell.styles.textColor=v.startsWith('-')?[200,50,50]:[0,140,80];}},
+      foot:[['TOTAL',tCons,tIng,(tIng-tCons)>=0?'+'+(tIng-tCons):String(tIng-tCons),tDaños,tFalla]],
+      footStyles:{fillColor:[20,20,40],textColor:[0,200,255],fontStyle:'bold'},
+      margin:{left:14,right:14}});
     y=doc.lastAutoTable.finalY+10;
   }
-  } // fin s5
 
-  // ── SECCIÓN 6: RECOMENDACIÓN DE COMPRA ────────────────────────────────────
-  if(secciones.s6!==false) {
-    newPageIfNeeded(10);
-    sectionTitle('6 — Recomendación de Compra Mensual',[0,130,80]);
-    const cfg = state.config.compras||{};
-    const sc6 = Number(cfg.semanasCobertura)||4;
-    const sb6 = Number(cfg.semanaBuffer)||2;
-    const tipos6 = getTiposSeleccionados();
-    const compraRes = tipos6.map(calcRecomendacionCompra).filter(r=>r.consumoSemanal>0)
-      .sort((a,b)=>{const o={critico:0,bajo:1,atencion:2,sin_dato:3,ok:4};return(o[a.estado]??5)-(o[b.estado]??5);});
-    const totalOrden6 = compraRes.reduce((a,r)=>a+r.ordenCompra,0);
-
-    // KPI header
-    const criticos6 = compraRes.filter(r=>r.estado==='critico'||r.estado==='bajo').length;
-    kpiRow([
-      {label:'Semanas a cubrir', value:`${sc6}+${sb6} = ${sc6+sb6}`,    color:[0,130,80]},
-      {label:'Tipologías analizadas', value:String(compraRes.length),    color:[0,100,60]},
-      {label:'Estado crítico/bajo', value:String(criticos6),             color:criticos6>0?[200,50,50]:[0,140,80]},
-      {label:'Total a comprar', value:`${totalOrden6} pl.`,              color:[0,180,110]},
-    ]);
-
-    doc.setFont('helvetica','italic');doc.setFontSize(8);doc.setTextColor(80,130,100);
-    doc.text(`Orden = MAX(0, ${sc6+sb6} sem. × consumo semanal promedio − stock actual)  ·  Stock = última col B del Excel`,14,y);y+=6;
-
-    doc.autoTable({
-      head:[['Tipología','Cons./semana','Stock actual','Semanas c/stock','Necesidad total','ORDEN COMPRA','Estado']],
-      body:compraRes.map(r=>[
-        r.tipo,
-        r.consumoSemanal.toFixed(1),
-        r.stockActual!==null?String(r.stockActual):'Sin dato',
-        r.semanasConStock!==null?r.semanasConStock+'s':'—',
-        String(r.necesidadTotal),
-        r.ordenCompra>0?String(r.ordenCompra):'✓ OK',
-        r.estado==='critico'?'⛔ Sin stock':r.estado==='bajo'?'🔴 Stock bajo':r.estado==='atencion'?'⚠️ Atención':r.estado==='ok'?'✅ OK':'— Sin dato',
-      ]),
-      startY:y,
-      styles:{fontSize:8.5,cellPadding:3.5,textColor:[30,30,50]},
-      headStyles:{fillColor:[0,100,60],textColor:[255,255,255],fontStyle:'bold',fontSize:8.5},
-      alternateRowStyles:{fillColor:[242,252,246]},
-      columnStyles:{
-        0:{fontStyle:'bold',textColor:[0,80,50]},
-        1:{halign:'center'},2:{halign:'center',fontStyle:'bold'},
-        3:{halign:'center'},4:{halign:'center'},
-        5:{halign:'center',fontStyle:'bold'},6:{halign:'center'},
-      },
-      didParseCell(d){
-        if(d.section==='body'){
-          if(d.column.index===5){
-            const v=d.cell.text[0];
-            d.cell.styles.textColor=v==='✓ OK'?[0,140,80]:[0,160,100];
-            if(v!=='✓ OK') d.cell.styles.textColor=[0,120,200];
-          }
-          if(d.column.index===6){
-            const v=d.cell.text[0];
-            if(v.includes('Sin stock')||v.includes('Stock bajo'))d.cell.styles.textColor=[200,50,50];
-            else if(v.includes('Atención'))d.cell.styles.textColor=[180,100,0];
-            else if(v.includes('OK'))d.cell.styles.textColor=[0,140,80];
-          }
-          // Resaltar orden de compra alta
-          if(d.column.index===5&&d.cell.text[0]!=='✓ OK'){
-            d.cell.styles.fillColor=[230,248,240];
-            d.cell.styles.fontStyle='bold';
-            d.cell.styles.textColor=[0,100,50];
-          }
-        }
-      },
-      foot:[['TOTAL','—','—','—','—',String(totalOrden6)+' pl.','—']],
-      footStyles:{fillColor:[20,20,40],textColor:[80,255,150],fontStyle:'bold',fontSize:9},
-      margin:{left:14,right:14},
+  // S3
+  if(secciones.s3!==false){
+    newPage(10);secTitle('3 — Consumo vs Ingresos por Tipología',[0,100,160]);
+    const rows=Object.entries(tipoTotales).sort((a,b)=>b[1].c-a[1].c).map(([t,v])=>{
+      const b=v.i-v.c;return[t,v.c,v.i,b>=0?'+'+b:String(b),v.da,v.fa];
     });
+    doc.autoTable({head:[['Tipología','Consumo','Ingresos','Balance','Daños','Falla Prov.']],body:rows,startY:y,
+      styles:{fontSize:9,cellPadding:4,textColor:[30,30,50]},
+      headStyles:{fillColor:[0,100,160],textColor:[255,255,255],fontStyle:'bold'},
+      alternateRowStyles:{fillColor:[245,248,252]},
+      columnStyles:{0:{fontStyle:'bold'},3:{halign:'center',fontStyle:'bold'},4:{halign:'center'},5:{halign:'center'}},
+      didParseCell(d){if(d.section==='body'&&d.column.index===3){const v=d.cell.text[0];d.cell.styles.textColor=v.startsWith('-')?[200,50,50]:[0,140,80];}},
+      margin:{left:14,right:14}});
     y=doc.lastAutoTable.finalY+10;
-  } // fin s6
+  }
 
-  // PIE DE PÁGINA
+  // S3b
+  if(secciones.s3b!==false){
+    newPage(10);secTitle('3b — Consumo por Tipología × Mes',[0,80,140]);
+    doc.setFont('helvetica','italic');doc.setFontSize(8);doc.setTextColor(120,130,150);
+    doc.text('Consumo (ingresos entre paréntesis).',14,y);y+=6;
+    const tipos3b=Object.keys(tipoTotales).sort((a,b)=>tipoTotales[b].c-tipoTotales[a].c);
+    const mHead=['Tipología',...meses.map(m=>m.slice(0,3)),'Total'];
+    const mBody=tipos3b.map(t=>{
+      const f=[t];
+      meses.forEach(m=>{const d=state.data[m];const c=d?.consumo?.[t]||0;const i=d?.ingresos?.[t]||0;f.push(c>0||i>0?c+(i>0?` (${i})`:''): '—');});
+      f.push(tipoTotales[t]?.c||0);return f;
+    });
+    const mFoot=['TOTAL',...meses.map(m=>{const d=state.data[m];if(!d)return'—';
+      const c=Object.values(d.consumo||{}).reduce((a,v)=>a+v,0);
+      const i=Object.values(d.ingresos||{}).reduce((a,v)=>a+v,0);
+      return c+(i>0?` (${i})`:'');
+    }),tCons];
+    doc.autoTable({head:[mHead],body:mBody,foot:[mFoot],startY:y,
+      styles:{fontSize:7.5,cellPadding:2.5,textColor:[30,30,50],halign:'center'},
+      headStyles:{fillColor:[0,80,140],textColor:[255,255,255],fontStyle:'bold',fontSize:8,halign:'center'},
+      alternateRowStyles:{fillColor:[245,248,252]},
+      columnStyles:{0:{fontStyle:'bold',textColor:[0,60,110],halign:'left',cellWidth:28},[meses.length+1]:{fontStyle:'bold'}},
+      footStyles:{fillColor:[20,20,40],textColor:[0,200,255],fontStyle:'bold',fontSize:8},
+      margin:{left:14,right:14}});
+    y=doc.lastAutoTable.finalY+10;
+  }
+
+  // S4
+  if(secciones.s4!==false){
+    newPage(10);secTitle('4 — Días de Parada por Quiebre de Stock',[160,30,30]);
+    const rows=resA.filter(r=>r.totalCons>0).sort((a,b)=>b.totalDias-a.totalDias).map(r=>{
+      const pct=r.totalDH>0?(r.totalDias/r.totalDH*100).toFixed(0)+'%':'0%';
+      const st=r.totalDias===0?'Sin paradas':r.totalDias<=5?'Atención':'CRÍTICO';
+      const det=Object.entries(r.porMes).filter(([,rm])=>rm.dias>0).map(([m,rm])=>`${m.slice(0,3)}:${rm.dias}d`).join(' · ')||'—';
+      return[r.tipo,r.totalCons,r.totalDias+'d / '+r.totalDH+'d',pct,det,st];
+    });
+    doc.autoTable({head:[['Tipología','Consumo','Días parada','% período','Detalle por mes','Estado']],body:rows,startY:y,
+      styles:{fontSize:8.5,cellPadding:3.5,textColor:[30,30,50]},
+      headStyles:{fillColor:[160,30,30],textColor:[255,255,255],fontStyle:'bold'},
+      alternateRowStyles:{fillColor:[252,245,245]},
+      columnStyles:{0:{fontStyle:'bold',textColor:[120,20,20]},2:{halign:'center',fontStyle:'bold'},3:{halign:'center'},4:{fontSize:7.5},5:{halign:'center',fontStyle:'bold'}},
+      didParseCell(d){if(d.section==='body'&&d.column.index===5){const v=d.cell.text[0];d.cell.styles.textColor=v==='CRÍTICO'?[200,50,50]:v==='Atención'?[180,100,0]:[0,140,80];}},
+      foot:[['TOTAL',resA.reduce((a,r)=>a+r.totalCons,0),totalDias+'d acum.','—','—','—']],
+      footStyles:{fillColor:[20,20,40],textColor:[255,100,100],fontStyle:'bold'},
+      margin:{left:14,right:14}});
+    y=doc.lastAutoTable.finalY+10;
+  }
+
+  // S5
+  if(secciones.s5!==false){
+    newPage(10);secTitle('5 — Reclamos de Calidad (Sector Calidad)',[140,70,0]);
+    if(state.reclamos.length===0){
+      doc.setFont('helvetica','italic');doc.setFontSize(10);doc.setTextColor(150,150,170);
+      doc.text('Sin reclamos registrados en el período.',14,y+6);y+=14;
+    } else {
+      const tF=Object.entries(pfAll).sort((a,b)=>b[1]-a[1]);
+      const mF=(()=>{const pm={};state.reclamos.forEach(r=>{pm[r.mes]=(pm[r.mes]||0)+1;});return Object.entries(pm).sort((a,b)=>b[1]-a[1])[0];})();
+      kpiRow([
+        {label:'Total reclamos',         value:String(totalRec),                                             color:[180,70,0]},
+        {label:'Tipo más reclamado',     value:tF[0]?.[0]||'—',                                              color:[160,60,0]},
+        {label:'Mes con más reclamos',   value:mF?.[0]?.split(' ')[0]||'—',                                  color:[140,50,0]},
+        {label:'% sobre consumo',        value:tCons>0?(totalRec/tCons*100).toFixed(1)+'%':'—',              color:[120,40,0]},
+      ]);
+      doc.autoTable({head:[['Tipología','Cant.','%']],body:tF.map(([t,n])=>[t,n,(n/totalRec*100).toFixed(1)+'%']),startY:y,
+        styles:{fontSize:9,cellPadding:3.5,textColor:[30,30,50]},
+        headStyles:{fillColor:[140,70,0],textColor:[255,255,255],fontStyle:'bold'},
+        alternateRowStyles:{fillColor:[252,248,242]},
+        columnStyles:{0:{fontStyle:'bold'},1:{halign:'center',fontStyle:'bold'},2:{halign:'center'}},
+        foot:[['TOTAL',totalPF,'100%']],
+        footStyles:{fillColor:[20,20,40],textColor:[255,180,80],fontStyle:'bold'},
+        margin:{left:14,right:14}});
+      y=doc.lastAutoTable.finalY+8;
+      newPage(10);
+      const recPM={};state.reclamos.forEach(r=>{recPM[r.mes]=(recPM[r.mes]||0)+1;});
+      doc.autoTable({head:[['Mes','Cant.','%']],body:Object.entries(recPM).map(([m,n])=>[m,n,(n/totalRec*100).toFixed(1)+'%']),startY:y,
+        styles:{fontSize:9,cellPadding:3.5},headStyles:{fillColor:[140,70,0],textColor:[255,255,255],fontStyle:'bold'},
+        alternateRowStyles:{fillColor:[252,248,242]},
+        columnStyles:{0:{fontStyle:'bold'},1:{halign:'center',fontStyle:'bold'},2:{halign:'center'}},
+        foot:[['TOTAL',totalPF,'100%']],footStyles:{fillColor:[20,20,40],textColor:[255,180,80],fontStyle:'bold'},
+        margin:{left:14,right:14}});
+      y=doc.lastAutoTable.finalY+8;
+      newPage(10);
+      doc.autoTable({
+        head:[['Fecha','Tipología','Paquete','% Ok','Nro. Rec.','Observaciones']],
+        body:state.reclamos.sort((a,b)=>new Date(a.fecha)-new Date(b.fecha)).map(r=>[
+          r.fecha?new Date(r.fecha+'T12:00').toLocaleDateString('es-AR'):'—',
+          r.tipo||'—',r.paquete||'—',r.porcentaje!=null?r.porcentaje+'%':'—',r.nroReclamo||'—',
+          r.observaciones?(r.observaciones.length>38?r.observaciones.slice(0,36)+'…':r.observaciones):'—',
+        ]),startY:y,
+        styles:{fontSize:7.5,cellPadding:3},
+        headStyles:{fillColor:[140,70,0],textColor:[255,255,255],fontStyle:'bold',fontSize:8},
+        alternateRowStyles:{fillColor:[252,248,242]},
+        columnStyles:{0:{cellWidth:22},1:{fontStyle:'bold',cellWidth:26},2:{cellWidth:20,halign:'center'},3:{cellWidth:14,halign:'center'},4:{cellWidth:22,halign:'center'},5:{}},
+        margin:{left:14,right:14}});
+      y=doc.lastAutoTable.finalY+10;
+    }
+  }
+
+  // S6
+  if(secciones.s6!==false){
+    newPage(10);secTitle('6 — Recomendación de Compra Mensual',[0,130,80]);
+    const cfg=state.config.compras||{};
+    const sc=Number(cfg.semanasCobertura)||4;
+    const sb=Number(cfg.semanaBuffer)||2;
+    const cRes=tiposA.map(calcRecomendacionCompra).filter(r=>r.consumoSemanal>0)
+      .sort((a,b)=>{const o={critico:0,bajo:1,atencion:2,sin_dato:3,ok:4};return(o[a.estado]??5)-(o[b.estado]??5);});
+    const totOrden=cRes.reduce((a,r)=>a+r.ordenCompra,0);
+    kpiRow([
+      {label:'Semanas a cubrir',    value:`${sc}+${sb}=${sc+sb}`,   color:[0,130,80]},
+      {label:'Tipologías',           value:String(cRes.length),       color:[0,100,60]},
+      {label:'Estado crítico/bajo',  value:String(cRes.filter(r=>r.estado==='critico'||r.estado==='bajo').length), color:[200,50,50]},
+      {label:'Total a comprar',      value:`${totOrden} pl.`,         color:[0,180,110]},
+    ]);
+    doc.setFont('helvetica','italic');doc.setFontSize(8);doc.setTextColor(80,130,100);
+    doc.text(`Orden = MAX(0, ${sc+sb} sem. × consumo semanal − stock actual)  ·  Stock = última col B del Excel`,14,y);y+=7;
+    doc.autoTable({
+      head:[['Tipología','Cons./sem.','Stock actual','Sem. c/stock','Necesidad','Orden compra','Estado']],
+      body:cRes.map(r=>[r.tipo,r.consumoSemanal.toFixed(1),r.stockActual!==null?String(r.stockActual):'Sin dato',
+        r.semanasConStock!==null?r.semanasConStock+'s':'—',String(r.necesidadTotal),
+        r.ordenCompra>0?String(r.ordenCompra):'✓ OK',
+        r.estado==='critico'?'⛔ Sin stock':r.estado==='bajo'?'🔴 Bajo':r.estado==='atencion'?'⚠️ Atención':r.estado==='ok'?'✅ OK':'— Sin dato']),
+      startY:y,styles:{fontSize:8.5,cellPadding:3.5,textColor:[30,30,50]},
+      headStyles:{fillColor:[0,100,60],textColor:[255,255,255],fontStyle:'bold'},
+      alternateRowStyles:{fillColor:[242,252,246]},
+      columnStyles:{0:{fontStyle:'bold',textColor:[0,80,50]},1:{halign:'center'},2:{halign:'center',fontStyle:'bold'},
+        3:{halign:'center'},4:{halign:'center'},5:{halign:'center',fontStyle:'bold'},6:{halign:'center'}},
+      didParseCell(d){
+        if(d.section==='body'&&d.column.index===6){const v=d.cell.text[0];
+          d.cell.styles.textColor=v.includes('Sin stock')||v.includes('Bajo')?[200,50,50]:v.includes('Atención')?[180,100,0]:v.includes('OK')?[0,140,80]:[120,120,140];}
+      },
+      foot:[['TOTAL','—','—','—','—',totOrden+' pl.','—']],
+      footStyles:{fillColor:[20,20,40],textColor:[80,255,150],fontStyle:'bold'},
+      margin:{left:14,right:14}});
+    y=doc.lastAutoTable.finalY+10;
+  }
+
+  // PIE
   const pc=doc.internal.getNumberOfPages();
   for(let i=1;i<=pc;i++){
     doc.setPage(i);
